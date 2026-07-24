@@ -1,0 +1,32 @@
+---
+description: Python API, lifecycle, exception, and callback conventions
+globs: src/ur_client_library/**/*.py
+alwaysApply: false
+---
+
+# Python API and lifecycle
+
+- Constructors validate and store configuration; open sockets and start
+  threads only in `connect()` or `start()`.
+- Use explicit `connect()` → `start()` → bounded, idempotent `close()`
+  lifecycles. Network clients should support context managers.
+- Use snake_case methods, PascalCase classes, properties for read-only state,
+  and keyword-only options where they improve clarity.
+- Preserve behavior rather than C++ call shapes: return typed values instead
+  of output parameters and use mappings for RTDE data packages.
+- Polling reads return `None` only for a documented caller timeout. Disconnect,
+  protocol, command, lifecycle, and worker failures raise typed exceptions.
+- Raise `URCLConnectionError`, which remains both a `URCLException` and
+  Python built-in `ConnectionError`; do not publish a shadowing package
+  `ConnectionError`.
+- Accept validated sequences at public boundaries and return immutable tuples
+  or semantic `Q`, `Pose`, and `MotionTarget` values.
+- Subscription methods return idempotent unsubscribe callables. Invoke user
+  callbacks outside internal locks and document that they run on worker
+  threads.
+- Retain worker failures and surface them through relevant public operations;
+  do not allow silent thread death.
+- `UrDriver` does not own a dashboard client. Require explicit G5 or
+  PolyScope X backend selection when constructing `DashboardClient`.
+- Follow `docs/api-mapping.md` when changing public names, returns, imports, or
+  exception behavior.

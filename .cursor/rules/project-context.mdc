@@ -1,0 +1,30 @@
+---
+description: Core repository context and upstream alignment policy for the Python URCL port
+alwaysApply: true
+---
+
+# Project context
+
+- The repository root is `universal-robots-client-library-python/`, not its
+  parent workspace.
+- The sibling `../Universal_Robots_Client_Library/` repository is the C++
+  source of truth. Consult both `src/` and implementation-bearing headers
+  under `include/ur_client_library/`.
+- The current parity baseline is URCL 2.14.0 at `91be9ee`. This is a recorded
+  checkpoint, not a permanent pin: when upstream changes, assess the delta and
+  keep this Python port aligned with active supported behavior.
+- Record an adopted upstream baseline in `README.md`, `docs/parity.md`, and
+  `CHANGELOG.md`; do not claim parity until implementation and validation are
+  complete.
+- Preserve wire behavior and state machines while using Pythonic API shapes.
+- The public API is synchronous with internal worker threads and supports
+  Python 3.10 through 3.13.
+- PolyScope 5/e-Series and PolyScope X are the validated example targets. CB3
+  paths remain only for historical compatibility unless scope is deliberately
+  expanded.
+- Treat `../RTDE_Python_Client_Library/` as a behavioral reference, not a
+  runtime dependency; retain required attribution when adapting behavior.
+- Keep parent-workspace hardware scripts, real controller addresses,
+  credentials, and local support files outside this repository.
+- Use `docs/api-mapping.md`, `docs/parity.md`, and `tests/coverage.md` as the
+  canonical API, source-parity, and validation ledgers.

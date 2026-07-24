@@ -1,0 +1,34 @@
+---
+description: Wire-protocol fidelity requirements for translated URCL behavior
+globs: src/ur_client_library/**/*
+alwaysApply: false
+---
+
+# Protocol fidelity
+
+- Follow executed upstream C++ behavior when code and prose disagree. Read the
+  matching source and header before changing translated behavior.
+- When upstream URCL evolves, compare from the recorded baseline and port
+  applicable protocol, state-machine, version-gate, and resource changes
+  together; do not update only the reported version.
+- Preserve exact big-endian framing, packet sizes, field order, signed bounds,
+  timeout meanings, retry categories, and state transitions.
+- A retry count of `0` means unlimited retries where inherited from upstream.
+- Preserve C++ numeric behavior with existing helpers, including
+  half-away-from-zero rounding and libstdc++-compatible calibration hashing.
+- Treat the trajectory serializer, 21-word target layout, microsecond time
+  scaling, motion types, and bundled `external_control.urscript` as one
+  versioned wire protocol. Never change or source them independently.
+- Keep RTDE recipe negotiation, input ownership, reconnect, and blocking versus
+  background-read semantics explicit rather than replacing them with generic
+  retry abstractions.
+- Primary parsing remains intentionally partial: retain structured supported
+  packages and lenient raw-byte fallback for unknown packages.
+- Preserve backend differences. Unsupported G5 or PolyScope X dashboard
+  operations raise `NotImplementedError`; never silently switch transports.
+- Use synchronous `httpx` for PolyScope X so connect, read, and write timeout
+  semantics remain distinct.
+- Implement ScriptReader's restricted upstream grammar directly; do not assume
+  Jinja templates have equivalent comparison, coercion, or version behavior.
+- Add focused byte-level or state-machine tests for every protocol change and
+  update the corresponding entry in `docs/parity.md`.

@@ -1,0 +1,35 @@
+---
+description: Required validation, documentation, and repository hygiene before completing changes
+alwaysApply: true
+---
+
+# Change completion
+
+Run from the repository root after substantive Python changes:
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest
+.venv/bin/ruff check src tests examples run_examples.py
+.venv/bin/mypy
+```
+
+- Install the editable development package with
+  `.venv/bin/python -m pip install -e ".[dev]"` when dependencies or the
+  environment are not current.
+- For packaging, metadata, or bundled-resource changes, build the wheel and
+  test a clean, non-editable install. Verify `py.typed` and
+  `resources/external_control.urscript` are present.
+- Offline pytest, Docker URSim integration, and manual physical-controller
+  checks are separate validation layers. Do not describe one as another.
+- Read the current URSim matrix from `.github/workflows/examples.yml` rather
+  than copying version lists into guidance.
+- Public API or lifecycle changes update `docs/api-mapping.md`; translated
+  source changes update `docs/parity.md`; validation changes update
+  `tests/coverage.md`; example changes update `docs/examples.md`; safety,
+  retry, threading, or binding changes update `docs/lifecycle-and-safety.md`.
+- Keep `tests/coverage.md` as a behavioral ledger, not a line-coverage claim.
+- Do not commit URSim locks, databases, blobs, generated installations,
+  `programs.UR*` links, caches, virtual environments, logs, secrets, private
+  keys, real robot addresses, or parent-workspace hardware scripts.
+- Before committing, inspect the complete staged file list and diff, check for
+  symlinks and secrets, and verify the branch and repository root.
