@@ -1,0 +1,98 @@
+"""Robot-domain enumerations shared by client interfaces."""
+
+from enum import IntEnum
+
+
+class RobotMode(IntEnum):
+    UNKNOWN = -128
+    NO_CONTROLLER = -1
+    DISCONNECTED = 0
+    CONFIRM_SAFETY = 1
+    BOOTING = 2
+    POWER_OFF = 3
+    POWER_ON = 4
+    IDLE = 5
+    BACKDRIVE = 6
+    RUNNING = 7
+    UPDATING_FIRMWARE = 8
+
+
+class SafetyMode(IntEnum):
+    NORMAL = 1
+    REDUCED = 2
+    PROTECTIVE_STOP = 3
+    RECOVERY = 4
+    SAFEGUARD_STOP = 5
+    SYSTEM_EMERGENCY_STOP = 6
+    ROBOT_EMERGENCY_STOP = 7
+    VIOLATION = 8
+    FAULT = 9
+    VALIDATE_JOINT_ID = 10
+    UNDEFINED_SAFETY_MODE = 11
+    AUTOMATIC_MODE_SAFEGUARD_STOP = 12
+    SYSTEM_THREE_POSITION_ENABLING_STOP = 13
+    TP_THREE_POSITION_ENABLING_STOP = 14
+    IMMI_EMERGENCY_STOP = 15
+    IMMI_SAFEGUARD_STOP = 16
+    PROFISAFE_WAITING_FOR_PARAMETERS = 17
+    PROFISAFE_AUTOMATIC_MODE_SAFEGUARD_STOP = 18
+    PROFISAFE_SAFEGUARD_STOP = 19
+    PROFISAFE_EMERGENCY_STOP = 20
+    SAFETY_API_SAFEGUARD_STOP = 22
+
+
+class SafetyStatus(IntEnum):
+    NORMAL = 1
+    REDUCED = 2
+    PROTECTIVE_STOP = 3
+    RECOVERY = 4
+    SAFEGUARD_STOP = 5
+    SYSTEM_EMERGENCY_STOP = 6
+    ROBOT_EMERGENCY_STOP = 7
+    VIOLATION = 8
+    FAULT = 9
+    VALIDATE_JOINT_ID = 10
+    UNDEFINED_SAFETY_MODE = 11
+    AUTOMATIC_MODE_SAFEGUARD_STOP = 12
+    SYSTEM_THREE_POSITION_ENABLING_STOP = 13
+
+
+class AnalogOutputType(IntEnum):
+    SET_ON_TEACH_PENDANT = -1
+    CURRENT = 0
+    VOLTAGE = 1
+
+
+class RobotType(IntEnum):
+    UNDEFINED = -128
+    UR5 = 1
+    UR10 = 2
+    UR3 = 3
+    UR16 = 4
+    UR18 = 5
+    UR8_LONG = 6
+    UR20 = 7
+    UR30 = 8
+    UR15 = 9
+
+
+class RobotSeries(IntEnum):
+    UNDEFINED = -128
+    CB3 = 1
+    E_SERIES = 2
+    UR_SERIES = 3
+
+
+class ReportLevel(IntEnum):
+    DEBUG = 0
+    INFO = 1
+    WARNING = 2
+    VIOLATION = 3
+    FAULT = 4
+    CRITICAL_FAULT = 5
+    DEVL_DEBUG = 128
+    DEVL_INFO = 129
+    DEVL_WARNING = 130
+    DEVL_VIOLATION = 131
+    DEVL_FAULT = 132
+    DEVL_CRITICAL_FAULT = 133

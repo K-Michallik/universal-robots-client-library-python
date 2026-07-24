@@ -1,0 +1,111 @@
+name: Python examples
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "38 2 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: pytest
+      - run: ruff check src tests examples run_examples.py
+      - run: mypy
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install build
+      - run: python -m build
+      - name: Smoke-test clean wheel install
+        run: |
+          python -m venv /tmp/urcl-wheel-smoke
+          /tmp/urcl-wheel-smoke/bin/python -m pip install dist/*.whl
+          /tmp/urcl-wheel-smoke/bin/python - <<'PY'
+          from importlib import resources
+
+          import ur_client_library
+
+          package = resources.files("ur_client_library")
+          assert package.joinpath("py.typed").is_file()
+          assert package.joinpath("resources", "external_control.urscript").is_file()
+          print(ur_client_library.__version__)
+          PY
+
+  ursim:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    needs: [offline, package]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: ur5e
+            version: 5.9.4
+          - model: ur20
+            version: latest
+          - model: ur5e
+            version: 10.7.0
+          - model: ur5e
+            version: 10.11.0
+          - model: ur5e
+            version: 10.12.0
+          - model: ur7e
+            version: 10.13.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - run: python -m pip install -e .
+      - name: Start URSim
+        run: |
+          chmod +x scripts/start_ursim.sh
+          scripts/start_ursim.sh -m "${{ matrix.model }}" -v "${{ matrix.version }}"
+      - uses: browser-actions/setup-chrome@v1
+        if: startsWith(matrix.version, '10.')
+      - name: Initialize PolyScope X web application
+        if: startsWith(matrix.version, '10.')
+        run: chrome --no-sandbox --disable-settuid-sandbox --headless=new 192.168.56.101 &
+      - name: Run bounded examples
+        run: >
+          python run_examples.py
+          --simulator
+          --robot-ip 192.168.56.101
+      - name: Capture URSim log
+        if: always()
+        run: docker logs ursim > "ursim-${{ matrix.version }}-${{ matrix.model }}.log" 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ursim-${{ matrix.version }}-${{ matrix.model }}
+          path: ursim-*.log
+          if-no-files-found: warn
+          retention-days: 10
+      - name: Stop URSim
+        if: always()
+        run: docker rm -f ursim >/dev/null 2>&1 || true
