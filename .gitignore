@@ -51,6 +51,8 @@ id_ed25519*
 # Files written into bind-mounted fixtures by Docker URSim
 tests/resources/dockerursim/programs/**/programs.UR*
 tests/resources/dockerursim/programs/**/default.installation
+tests/resources/dockerursim/programs/**/*.variables.problem
 tests/resources/dockerursim/programs/polyscopex/*.xd
 tests/resources/dockerursim/programs/polyscopex/*.lck
 tests/resources/dockerursim/programs/polyscopex/blobs/
+tests/resources/dockerursim/programs/polyscopex/.id-counters.json

@@ -22,6 +22,7 @@ from ur_client_library.control import (
 )
 from ur_client_library.exceptions import InvalidRangeError
 from ur_client_library.types import Pose, Q
+from ur_client_library.ur.robot_receive_timeout import RobotReceiveTimeout
 
 
 def test_target_aware_trajectory_layout_includes_q_near() -> None:
@@ -119,7 +120,11 @@ def test_stream_helper_sends_exact_successful_point_count_and_keepalive() -> Non
     trajectory = TrajectoryPointInterface(server=trajectory_server)
     reverse_server.connect_client()
     trajectory_server.connect_client()
-    stream = TrajectoryStream(reverse, trajectory)
+    stream = TrajectoryStream(
+        reverse,
+        trajectory,
+        robot_receive_timeout=RobotReceiveTimeout.off(),
+    )
 
     stream.start_stream()
     stream.write(MoveJPrimitive(Q(0, 0, 0, 0, 0, 0)))
@@ -128,6 +133,7 @@ def test_stream_helper_sends_exact_successful_point_count_and_keepalive() -> Non
     assert stream.end_stream() == 2
 
     reverse_words = [unpack(packet) for packet in reverse_server.writes]
+    assert all(words[0] == 0 for words in reverse_words)
     assert reverse_words[0][1:3] == (2, 0)
     assert reverse_words[-2][1:3] == (0, 0)
     assert reverse_words[-1][1:3] == (3, 2)

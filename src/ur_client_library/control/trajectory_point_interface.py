@@ -14,6 +14,7 @@ from ur_client_library.exceptions import (
     UnsupportedMotionTypeError,
 )
 from ur_client_library.types import Pose, Q, validate_floats
+from ur_client_library.ur.robot_receive_timeout import RobotReceiveTimeout
 
 from ._serialization import INT32_MAX, fixed, pack_int32s
 from ._server import ClientToken, Server, ServerFactory, socket_server_factory
@@ -256,9 +257,12 @@ class TrajectoryStream:
         self,
         reverse_interface: ReverseInterface,
         trajectory_interface: TrajectoryPointInterface,
+        *,
+        robot_receive_timeout: RobotReceiveTimeout | None = None,
     ) -> None:
         self._reverse = reverse_interface
         self._trajectory = trajectory_interface
+        self._robot_receive_timeout = robot_receive_timeout
         self._lock = threading.RLock()
         self._streaming = False
         self._finite_expected: int | None = None
@@ -283,7 +287,9 @@ class TrajectoryStream:
         if point_count < 0:
             raise ValueError("point_count must be non-negative")
         self._reverse.write_trajectory_control_message(
-            TrajectoryControlMessage.START, point_count
+            TrajectoryControlMessage.START,
+            point_count,
+            robot_receive_timeout=self._robot_receive_timeout,
         )
         with self._lock:
             self._streaming = False
@@ -292,7 +298,8 @@ class TrajectoryStream:
 
     def start_stream(self) -> None:
         self._reverse.write_trajectory_control_message(
-            TrajectoryControlMessage.STREAM_START
+            TrajectoryControlMessage.STREAM_START,
+            robot_receive_timeout=self._robot_receive_timeout,
         )
         with self._lock:
             self._streaming = True
@@ -313,7 +320,10 @@ class TrajectoryStream:
             self._sent_points += 1
 
     def keepalive(self) -> None:
-        self._reverse.write_trajectory_control_message(TrajectoryControlMessage.NOOP)
+        self._reverse.write_trajectory_control_message(
+            TrajectoryControlMessage.NOOP,
+            robot_receive_timeout=self._robot_receive_timeout,
+        )
 
     def end_stream(self) -> int:
         with self._lock:
@@ -321,7 +331,9 @@ class TrajectoryStream:
                 raise StreamNotConnectedError("No streaming trajectory is active")
             point_count = self._sent_points
         self._reverse.write_trajectory_control_message(
-            TrajectoryControlMessage.STREAM_END, point_count
+            TrajectoryControlMessage.STREAM_END,
+            point_count,
+            robot_receive_timeout=self._robot_receive_timeout,
         )
         with self._lock:
             self._streaming = False
@@ -333,7 +345,9 @@ class TrajectoryStream:
             streaming = self._streaming
             point_count = self._sent_points if streaming else 0
         self._reverse.write_trajectory_control_message(
-            TrajectoryControlMessage.CANCEL, point_count
+            TrajectoryControlMessage.CANCEL,
+            point_count,
+            robot_receive_timeout=self._robot_receive_timeout,
         )
         with self._lock:
             self._streaming = False

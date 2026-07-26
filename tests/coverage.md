@@ -36,7 +36,9 @@ This is a behavioral validation ledger, not a measured line-coverage report.
 ## Docker URSim integration
 
 The GitHub workflow and local Docker runner exercise bounded execution across
-the configured PolyScope 5/e-Series and PolyScope X matrix. Known
+the configured PolyScope 5/e-Series and PolyScope X matrix. PolyScope 5 jobs
+remain required; timing-sensitive PolyScope X jobs are reported but
+non-blocking and should be reproduced locally before triage. Known
 controller-version, geometry, remote-mode, and program prerequisites produce
 explicit skips. These jobs require Docker and are separate from the offline
 pytest suite.

@@ -115,9 +115,13 @@ terminal pose from invalidating the next example.
 
 `scripts/start_ursim.sh` launches representative Docker controllers. The
 repository's `.github/workflows/examples.yml` workflow runs offline checks and
-a separate PolyScope 5/e-Series and PolyScope X integration matrix; CB3 is not
-part of that matrix. Local and CI matrix runs can produce expected skips for
-controller-version, robot-geometry, remote-mode, and program prerequisites.
+a separate PolyScope 5/e-Series and PolyScope X integration matrix. CI gives
+the browser-backed PolyScope X services additional time to settle before
+starting examples. PolyScope X entries remain visible but non-blocking because
+their timing is sensitive to shared-runner load; reproduce failures locally
+before treating them as library regressions. CB3 is not part of that matrix.
+Local and CI matrix runs can produce expected skips for controller-version,
+robot-geometry, remote-mode, and program prerequisites.
 
 URSim validates connection, negotiation, command serialization, lifecycle, and
 cleanup. It does not validate physical torque response, contact detection,
