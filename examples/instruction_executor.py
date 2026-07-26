@@ -51,7 +51,6 @@ from ur_client_library import (
     InstructionExecutor,
     Pose,
     Q,
-    RobotType,
     VersionInformation,
 )
 from ur_client_library.control import (
@@ -136,11 +135,6 @@ def run(args: argparse.Namespace) -> None:
             cleanup.callback(safe_stop_control, driver)
             if not robot.is_healthy:
                 raise RuntimeError("Robot initialization failed")
-            if robot.primary_client.robot_type is not RobotType.UR5:
-                raise ExampleSkipped(
-                    "the upstream Cartesian targets are defined for UR5-family geometry; "
-                    f"robot reports {robot.primary_client.robot_type.name}"
-                )
             if not driver.check_calibration(CALIBRATION_CHECKSUM):
                 print(
                     "WARNING: the robot calibration does not match the upstream example's "

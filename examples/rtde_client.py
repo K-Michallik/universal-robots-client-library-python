@@ -56,16 +56,16 @@ def run(args: argparse.Namespace) -> None:
         target_frequency=RTDE_FREQUENCY,
     )
     with client:
-        client.start(background=True)
+        # Mirror the upstream C++ example: read directly from the interface in the
+        # main loop (no background thread) so every package is consumed in order and
+        # a lost connection aborts instead of being silently skipped.
+        client.start(background=False)
         speed_slider_fraction = 1.0
         speed_slider_increment = 0.01
         deadline = time.monotonic() + args.duration if args.duration else None
         try:
             while deadline is None or time.monotonic() < deadline:
-                timeout = 1.0 if deadline is None else max(0.0, deadline - time.monotonic())
-                data_package = client.get_data_package(timeout=timeout)
-                if data_package is None:
-                    continue
+                data_package = client.read_data_package()
                 target_value = data_package[TARGET_SPEED_FRACTION]
                 if isinstance(target_value, bool) or not isinstance(target_value, (int, float)):
                     raise TypeError(f"{TARGET_SPEED_FRACTION} is not a scalar RTDE value")
