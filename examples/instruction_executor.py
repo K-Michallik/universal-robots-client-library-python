@@ -308,10 +308,17 @@ def run(args: argparse.Namespace) -> None:
                         ),
                     ),
                     (
+                        # Deliberate deviation from the upstream sample, which
+                        # uses Q(-1.84, -1.8, 2.7, 4.2, 0.6, -4.0) here. That
+                        # target puts the far end of the arc out of reach on
+                        # PolyScope X, which stops the control script and
+                        # surfaces as a trajectory-interface disconnect. This
+                        # joint target demonstrates the same moveC-with-a-Q
+                        # form and is valid on both e-Series and PolyScope X.
                         "MoveC joint target",
                         lambda: executor.move_c(
                             Pose(-0.2, 0.5, 0.5, 0.68, -1.083, -2.076),
-                            Q(-1.84, -1.8, 2.7, 4.2, 0.6, -4.0),
+                            Q(-1.572, -1.686, 1.707, -0.833, 0.782, 0.479),
                         ),
                     ),
                     (

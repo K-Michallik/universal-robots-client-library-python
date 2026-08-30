@@ -35,11 +35,13 @@ from __future__ import annotations
 import argparse
 import logging
 import threading
+import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 
 from examples._common import (
     ExampleSkipped,
+    as_six_vector,
     confirm_start,
     create_parser,
     recipe_path,
@@ -67,6 +69,36 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _drain_script_commands(driver: UrDriver, seconds: float = 1.0) -> None:
+    """Keep the external-control program running long enough to apply pending commands."""
+    period = max(0.001, 1.0 / driver.control_frequency)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        driver.write_keepalive()
+        time.sleep(period)
+
+
+def _read_tcp_offset(
+    driver: UrDriver,
+    attempts: int = 15,
+) -> tuple[float, float, float, float, float, float] | None:
+    """Return the controller's current TCP offset, or None if it stays unavailable."""
+    # This example does not run the RTDE background reader, so read the
+    # package directly; fall back to the background accessor for callers that
+    # do have it running.
+    for _ in range(attempts):
+        with suppress(Exception):
+            return as_six_vector(driver.get_data_package_blocking()["tcp_offset"], "tcp_offset")
+        with suppress(Exception):
+            package = driver.get_data_package(timeout=1.0)
+            if package is not None:
+                return as_six_vector(package["tcp_offset"], "tcp_offset")
+        # Neither reader is available until the driver finishes bringing RTDE
+        # up, which happens shortly after the program starts.
+        time.sleep(0.2)
+    return None
+
+
 def run(args: argparse.Namespace) -> None:
     """Connect to the robot and cycle through script commands."""
     with ExampleRobotWrapper(
@@ -81,6 +113,12 @@ def run(args: argparse.Namespace) -> None:
         failures: list[Exception] = []
         worker: threading.Thread | None = None
         supports_friction_scales = False
+        # This example changes the TCP offset and the payload, which are
+        # controller-wide settings that outlive the program. Capture the
+        # incoming TCP offset so the finally block can put it back; leaving a
+        # tool offset behind shifts every later Cartesian target and can push
+        # it outside the robot's workspace.
+        original_tcp_offset: tuple[float, ...] | None = None
         try:
             if driver.version.major < 5:
                 raise ExampleSkipped("This script-command sequence requires an e-Series controller")
@@ -91,6 +129,15 @@ def run(args: argparse.Namespace) -> None:
                     "Friction scales are unavailable on PolyScope %s; those commands are skipped",
                     driver.version,
                 )
+
+            # Needed only to read back the TCP offset this example overwrites.
+            robot.start_rtde_communication(consume_data=True)
+            original_tcp_offset = _read_tcp_offset(driver)
+            if original_tcp_offset is None:
+                _LOGGER.warning(
+                    "Could not read the current TCP offset; it will be reset to zero afterwards"
+                )
+                original_tcp_offset = (0.0,) * 6
 
             worker = threading.Thread(
                 target=_send_script_commands,
@@ -126,6 +173,17 @@ def run(args: argparse.Namespace) -> None:
             if supports_friction_scales:
                 with suppress(Exception):
                     driver.set_friction_scales((1.0,) * 6, (1.0,) * 6)
+            if original_tcp_offset is not None:
+                with suppress(Exception):
+                    driver.set_tcp_offset(original_tcp_offset)
+            with suppress(Exception):
+                driver.set_payload(0.0, (0.0, 0.0, 0.0))
+            # The script command interface is asynchronous: the URScript reads
+            # one command per control cycle. Keep the external-control program
+            # alive briefly so it consumes the restore commands above before
+            # safe_stop_control tears the program down.
+            with suppress(Exception):
+                _drain_script_commands(driver)
             safe_stop_control(driver)
         if failures:
             raise failures[0]
