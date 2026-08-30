@@ -12,7 +12,12 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from examples._common import DEFAULT_ROBOT_IP, EXAMPLE_SKIPPED, duration_value
+from examples._common import (
+    DEFAULT_ROBOT_IP,
+    EXAMPLE_SKIPPED,
+    duration_value,
+    positive_int,
+)
 from examples._manifest import EXAMPLES, MODULES
 
 ROOT = Path(__file__).resolve().parent
@@ -55,6 +60,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--simulator",
         action="store_true",
         help="required acknowledgement that the target is URSim",
+    )
+    # The control script halts if it waits longer than this for a command. The
+    # per-example defaults assume a real-time driver; a shared CI host can stall
+    # a Python client well past them, which halts the script mid-motion and
+    # surfaces as a reverse/trajectory/script-command interface disconnect.
+    # RobotReceiveTimeout clamps realtime control modes to 200 ms, so that is
+    # the most headroom a servo loop can be given.
+    parser.add_argument(
+        "--receive-timeout-ms",
+        type=positive_int,
+        default=200,
+        help="control-script receive timeout for every example (default: 200)",
     )
     parser.add_argument(
         "--allow-unverified-simulator",
@@ -191,6 +208,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             str(duration),
             "--simulator",
             "--yes",
+            "--receive-timeout-ms",
+            str(args.receive_timeout_ms),
         ]
         return_code = _run_process(command, process_timeout)
         if return_code == EXAMPLE_SKIPPED:

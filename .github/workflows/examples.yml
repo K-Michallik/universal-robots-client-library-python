@@ -68,8 +68,8 @@ jobs:
             version: 5.9.4
           - model: ur20
             version: latest
-          - model: ur5e
-            version: 10.7.0
+          # PolyScope X support starts at 10.11; earlier 10.x builds have no
+          # dashboard backend and are not exercised.
           - model: ur5e
             version: 10.11.0
           - model: ur5e
@@ -87,15 +87,9 @@ jobs:
         run: |
           chmod +x scripts/start_ursim.sh
           scripts/start_ursim.sh -m "${{ matrix.model }}" -v "${{ matrix.version }}"
-      - uses: browser-actions/setup-chrome@v1
+      - name: Wait for PolyScope X to become controllable
         if: startsWith(matrix.version, '10.')
-      - name: Initialize PolyScope X web application
-        if: startsWith(matrix.version, '10.')
-        run: |
-          chrome --no-sandbox --disable-settuid-sandbox --headless=new 192.168.56.101 &
-          # The web server becomes reachable before the backend finishes
-          # loading and confirming the simulator's initial safety setup.
-          sleep 60
+        run: python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101
       - name: Run bounded examples
         run: >
           python run_examples.py

@@ -90,7 +90,9 @@ def run(args: argparse.Namespace) -> None:
             unsubscribe = driver.subscribe_tool_contact_result(handle_tool_contact)
             driver.start_tool_contact()
             tool_contact_started = True
-            receive_timeout = RobotReceiveTimeout.from_milliseconds(100)
+            receive_timeout = RobotReceiveTimeout.from_milliseconds(
+                args.receive_timeout_ms or 100
+            )
             deadline = time.monotonic() + args.duration if args.duration else None
             period = 1.0 / driver.control_frequency
 

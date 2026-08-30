@@ -160,7 +160,9 @@ def run(args: argparse.Namespace) -> None:
 
             timestep = 1.0 / driver.control_frequency
             maximum_control_time = PERIOD_COUNT / FREQUENCY_HZ
-            receive_timeout = RobotReceiveTimeout.from_milliseconds(100)
+            receive_timeout = RobotReceiveTimeout.from_milliseconds(
+                args.receive_timeout_ms or 100
+            )
             target_torques = [0.0] * 6
             control_time = 0.0
 

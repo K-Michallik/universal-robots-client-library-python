@@ -59,7 +59,9 @@ def run(args: argparse.Namespace) -> None:
         try:
             _LOGGER.info("Robot version: %s", driver.version)
             increment_constant = 0.002 if driver.version.major < 5 else 0.0005
-            receive_timeout = RobotReceiveTimeout.from_milliseconds(100)
+            receive_timeout = RobotReceiveTimeout.from_milliseconds(
+                args.receive_timeout_ms or 100
+            )
             joint_target: list[float] | None = None
             passed_positive_part = False
             passed_negative_part = False

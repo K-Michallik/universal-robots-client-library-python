@@ -52,6 +52,11 @@ class ExampleRobotWrapper:
     DEFAULT_ROBOT_IP = "192.168.56.101"
     DEFAULT_SCRIPT_RESOURCE = "external_control.urscript"
 
+    # Upstream waits 500 ms, which assumes an already powered robot. Brake
+    # release is still in flight when the control program is sent, so a loaded
+    # simulator needs considerably longer to attach to the reverse interface.
+    PROGRAM_START_TIMEOUT = 10.0
+
     def __init__(
         self,
         robot_ip: str,
@@ -162,10 +167,11 @@ class ExampleRobotWrapper:
         if not self._headless_mode and self._autostart_program:
             self.start_robot_program(self._autostart_program)
         if (self._headless_mode or self._autostart_program) and not self.wait_for_program_running(
-            0.5
+            self.PROGRAM_START_TIMEOUT
         ):
             raise URCLTimeoutError(
-                "Program did not start; is the robot in remote control mode?", 0.5
+                "Program did not start; is the robot in remote control mode?",
+                self.PROGRAM_START_TIMEOUT,
             )
         self._connected = True
 
