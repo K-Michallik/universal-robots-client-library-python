@@ -68,8 +68,8 @@ jobs:
             version: 5.9.4
           - model: ur20
             version: latest
-          - model: ur5e
-            version: 10.7.0
+          # PolyScope X support starts at 10.11; earlier 10.x builds have no
+          # dashboard backend and are not exercised.
           - model: ur5e
             version: 10.11.0
           - model: ur5e

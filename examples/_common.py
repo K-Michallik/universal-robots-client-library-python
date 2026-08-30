@@ -74,6 +74,16 @@ def create_parser(
         action="store_true",
         help="declare that the target is URSim and bypass physical-robot confirmation",
     )
+    # The control script halts as soon as it waits longer than this for a
+    # command, which is the watchdog that stops a robot whose driver died.
+    # A contended host can stall a Python client past the tight default, so
+    # simulator runs relax it; a physical robot keeps the example's own value.
+    parser.add_argument(
+        "--receive-timeout-ms",
+        type=positive_int,
+        default=None,
+        help="override the control-script receive timeout in milliseconds",
+    )
     return parser
 
 
