@@ -97,12 +97,21 @@ jobs:
           --robot-ip 192.168.56.101
       - name: Capture URSim log
         if: always()
-        run: docker logs ursim > "ursim-${{ matrix.version }}-${{ matrix.model }}.log" 2>&1 || true
+        run: |
+          docker logs ursim > "ursim-${{ matrix.version }}-${{ matrix.model }}.log" 2>&1 || true
+          # docker logs only carries the container banner. URControl.log holds
+          # the controller-side URScript runtime errors that explain why a
+          # control script stopped, which is what an interface "disconnect"
+          # on the client side actually means.
+          docker exec ursim cat /ursim/URControl.log \
+            > "urcontrol-${{ matrix.version }}-${{ matrix.model }}.log" 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ursim-${{ matrix.version }}-${{ matrix.model }}
-          path: ursim-*.log
+          path: |
+            ursim-*.log
+            urcontrol-*.log
           if-no-files-found: warn
           retention-days: 10
       - name: Stop URSim
