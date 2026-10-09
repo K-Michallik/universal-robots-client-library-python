@@ -10,7 +10,7 @@ alwaysApply: true
 - The sibling `../Universal_Robots_Client_Library/` repository is the C++
   source of truth. Consult both `src/` and implementation-bearing headers
   under `include/ur_client_library/`.
-- The current parity baseline is URCL 2.14.0 at `91be9ee`. This is a recorded
+- The current parity baseline is URCL 2.15.2 at `7747b68`. This is a recorded
   checkpoint, not a permanent pin: when upstream changes, assess the delta and
   keep this Python port aligned with active supported behavior.
 - Record an adopted upstream baseline in `README.md`, `docs/parity.md`, and

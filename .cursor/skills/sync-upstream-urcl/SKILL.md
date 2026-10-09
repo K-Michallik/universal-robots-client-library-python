@@ -7,7 +7,7 @@ description: Compares an updated C++ Universal Robots Client Library with the Py
 
 ## Alignment policy
 
-The recorded URCL 2.14.0 baseline is a checkpoint, not a permanent fork.
+The recorded URCL 2.15.2 baseline is a checkpoint, not a permanent fork.
 Whenever the C++ Client Library changes, assess the delta and keep the Python
 port aligned with active supported functionality. Do not change only version
 text, and do not claim a new parity baseline before code, resources, tests, and
