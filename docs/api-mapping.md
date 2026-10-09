@@ -82,7 +82,9 @@ Important specialized errors include:
 - `VersionMismatchError` and its robot-feature subclasses;
 - `RTDEInputConflictError` for inputs owned by another client;
 - `DashboardCommandError` for rejected dashboard operations;
-- `ScriptSyntaxError` and the `ScriptExecutionError` hierarchy;
+- `ScriptSyntaxError` (with `ScriptIncludeError` for rejected include paths),
+  `ScriptFileError` for unreadable script templates, and the
+  `ScriptExecutionError` hierarchy;
 - `RobotModeError` and `SafetyModeError` for invalid command preconditions.
 
 Import common high-level classes and errors from `ur_client_library`. Protocol

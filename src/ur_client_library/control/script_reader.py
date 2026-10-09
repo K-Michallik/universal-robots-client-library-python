@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TypeAlias
 
-from ur_client_library.exceptions import ScriptSyntaxError, UnknownVariableError
+from ur_client_library.exceptions import (
+    ScriptFileError,
+    ScriptIncludeError,
+    ScriptSyntaxError,
+    UnknownVariableError,
+)
 from ur_client_library.helpers import parse_boolean
 from ur_client_library.ur.version_information import VersionInformation
 
@@ -29,49 +34,93 @@ _BOOLEAN = re.compile(r"^(true|false|yes|no|on|off)$", re.IGNORECASE)
 _VERSION = re.compile(r"^v(\d+\.\d+(?:\.\d+)?(?:-\d+)?)$")
 
 
+def _is_rooted(raw: str) -> bool:
+    """Return whether an include path is absolute or rooted on POSIX or Windows.
+
+    Windows spellings such as ``\\evil.txt``, ``Z:evil.txt`` and UNC paths are
+    rejected on every platform, mirroring upstream's root-name/root-directory check.
+    """
+    return bool(PurePosixPath(raw).anchor or PureWindowsPath(raw).anchor)
+
+
 class ScriptReader:
-    """Apply only URCL's variables, includes, and line-based conditionals."""
+    """Apply only URCL's variables, includes, and line-based conditionals.
+
+    Includes are resolved relative to the including file and must stay inside
+    the directory of the top-level script. Rooted or absolute include paths,
+    include cycles, and chains deeper than :attr:`MAX_INCLUDE_DEPTH` raise.
+    """
+
+    MAX_INCLUDE_DEPTH = 32
 
     def read_script_file(
         self, file_path: str | Path, data: ScriptData | None = None
     ) -> str:
-        return self._read(Path(file_path), data or {}, ())
+        canonical = self._resolve(Path(file_path), str(file_path), "script file path")
+        return self._read(canonical, data or {}, canonical.parent, ())
 
     def _read(
         self,
-        path: Path,
+        canonical_path: Path,
         data: ScriptData,
+        root_dir: Path,
         include_stack: tuple[Path, ...],
     ) -> str:
-        normalized = path.resolve()
-        if normalized in include_stack:
-            chain = " -> ".join(str(item) for item in (*include_stack, normalized))
+        if canonical_path in include_stack:
+            chain = " -> ".join(str(item) for item in (*include_stack, canonical_path))
             raise ScriptSyntaxError(f"Cyclic script include: {chain}")
+        if len(include_stack) >= self.MAX_INCLUDE_DEPTH:
+            raise ScriptSyntaxError(
+                f"Maximum include depth ({self.MAX_INCLUDE_DEPTH}) exceeded while "
+                f"processing script file {str(canonical_path)!r}"
+            )
         try:
-            script = path.read_text()
+            script = canonical_path.read_text()
         except OSError as exc:
-            raise OSError(
-                f"Could not open script file {str(path)!r}; check that it exists and is readable"
+            raise ScriptFileError(
+                f"Could not open script file {str(canonical_path)!r}; "
+                "check that it exists and is readable"
             ) from exc
         script = self._replace_variables(script, data)
         script = self._replace_conditionals(script, data)
         return self._replace_includes(
-            script, path.parent, data, (*include_stack, normalized)
+            script, canonical_path.parent, data, root_dir, (*include_stack, canonical_path)
         )
 
     def _replace_includes(
         self,
         script: str,
-        base_path: Path,
+        current_dir: Path,
         data: ScriptData,
+        root_dir: Path,
         include_stack: tuple[Path, ...],
     ) -> str:
         while True:
             match = _INCLUDE.search(script)
             if match is None:
                 return script
-            included = self._read(base_path / match.group(1), data, include_stack)
+            raw = match.group(1)
+            if _is_rooted(raw):
+                raise ScriptIncludeError(
+                    f"Rooted or absolute include paths are not allowed: {raw!r}"
+                )
+            resolved = self._resolve(current_dir / raw, raw, "include path")
+            if not resolved.is_relative_to(root_dir):
+                raise ScriptIncludeError(
+                    f"Include path {raw!r} resolves outside of the script root directory "
+                    f"{str(root_dir)!r} (resolved to {str(resolved)!r})"
+                )
+            included = self._read(resolved, data, root_dir, include_stack)
             script = script[: match.start()] + included + script[match.end() :]
+
+    @staticmethod
+    def _resolve(path: Path, raw: str, context: str) -> Path:
+        # Non-strict resolution collapses ``..`` and follows symlinks so containment
+        # checks see the real target; a missing file is reported by the read instead.
+        try:
+            return path.resolve()
+        except (OSError, RuntimeError) as exc:
+            raise ScriptFileError(f"Could not resolve {context} {raw!r}: {exc}") from exc
 
     @staticmethod
     def _replace_variables(script: str, data: ScriptData) -> str:
