@@ -11,6 +11,7 @@ from ur_client_library.exceptions import (
     RobotRuntimeError,
     ScriptSyntaxError,
     URCLTimeoutError,
+    WorkerThreadError,
 )
 from ur_client_library.primary import (
     ErrorCodeMessage,
@@ -181,6 +182,36 @@ def test_started_reader_parses_frames_into_current_snapshots() -> None:
     assert client.robot_mode == RobotMode.IDLE
     client.close()
     assert not client.is_running
+
+
+@pytest.mark.parametrize("package_size", [4, 65536, 0x7FFFFFFF])
+def test_reader_rejects_out_of_range_package_size_without_reading_body(
+    package_size: int,
+) -> None:
+    transport = StreamingFakeTransport()
+    requested: list[int] = []
+    original_read = transport.read
+
+    def recording_read(size: int) -> bytes:
+        requested.append(size)
+        return original_read(size)
+
+    transport.read = recording_read  # type: ignore[method-assign]
+    client = PrimaryClient("127.0.0.1", transport=transport)
+    client.connect()
+    client.start()
+    transport.feed(struct.pack(">i", package_size) + b"\x10" * 16)
+
+    reader = client._reader
+    assert reader is not None
+    reader.join(1.0)
+    assert not client.is_running
+    with pytest.raises(WorkerThreadError) as raised:
+        client.pop_error_codes()
+    assert isinstance(raised.value.cause, ValueError)
+    assert f"Invalid Primary package size {package_size}" in str(raised.value)
+    assert requested == [4]
+    client.close()
 
 
 def test_script_upload_reconnects_and_retries_one_failed_write() -> None:

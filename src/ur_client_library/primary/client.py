@@ -10,6 +10,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Protocol, cast
 
+from ur_client_library.comm.stream import DEFAULT_MAX_PACKET_SIZE
 from ur_client_library.exceptions import (
     LifecycleError,
     ReadOnlyInterfaceError,
@@ -651,7 +652,9 @@ class PrimaryClient:
             while not self._stop_event.is_set():
                 header = self._read_exact(4)
                 package_size = int.from_bytes(header, "big", signed=True)
-                if package_size < 5:
+                # Bound the size before allocating: a corrupt or hostile length
+                # prefix must not make the reader request gigabytes.
+                if not 5 <= package_size <= DEFAULT_MAX_PACKET_SIZE:
                     raise ValueError(f"Invalid Primary package size {package_size}")
                 frame = header + self._read_exact(package_size - 4)
                 for package in self._parser.parse(frame):
