@@ -122,12 +122,23 @@ bash scripts/start_ursim.sh -m ur7e -v 10.14.0 -r \
   -p tests/resources/dockerursim/programs/polyscopex/10.14.0/ur7e \
   -c tests/resources/dockerursim/citadelDB/10.14.0
 python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101
+google-chrome --headless=new --user-data-dir=/tmp/polyscopex-chrome \
+  http://192.168.56.101 &
+python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101 --program-api
 python run_examples.py --simulator --robot-ip 192.168.56.101
 docker rm -f ursim
 ```
 
 Without `-c` the controller boots in local control and the dashboard example
 sends no state-changing commands.
+
+In remote control the dashboard example loads `wait_program` through the
+Robot API. PolyScope X serves the program endpoints through its web frontend,
+so they hang until the client times out (`PUT /program/v1/loaded timed out`)
+unless a UI session is open: a headless browser, as above, or a browser tab
+on `http://192.168.56.101`. Open it only after the first readiness check has
+confirmed safety; `--program-api` then waits until the endpoints answer.
+Stop the browser before removing the container.
 
 Version- and prerequisite-gated examples report as skipped rather than failing
 (for example the dashboard example when `wait_program`/`wait_program.urp` is not

@@ -38,9 +38,12 @@ confirmation.
    the Primary port, and allows controller stabilization. Use `-r` only when
    the user explicitly intends to replace an existing `ursim` container.
 
-5. For PolyScope X (`10.*`), initialize the web application before running
-   examples. Follow the current CI browser command when Chrome is available,
-   or ask the user to open `http://192.168.56.101`.
+5. For PolyScope X (`10.*`), run `scripts/wait_for_ursim_ready.py` before
+   running examples, as CI does. In remote control (citadel database
+   mounted), also open the web frontend afterwards, since the Robot API
+   program endpoints only answer while a UI session is open: follow the
+   current CI browser command when Chrome is available, or ask the user to
+   open `http://192.168.56.101`. Then rerun the script with `--program-api`.
 6. Run the bounded examples:
 
    ```bash
