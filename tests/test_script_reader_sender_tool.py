@@ -175,6 +175,22 @@ def test_reader_include_wraps_filesystem_error(tmp_path: Path) -> None:
     assert "'loop'" in str(excinfo.value)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need elevation on Windows")
+@pytest.mark.parametrize("target_exists", [True, False])
+def test_reader_include_symlink_escaping_root_is_rejected(
+    tmp_path: Path, target_exists: bool
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    if target_exists:
+        write(outside, "SECRET")
+    (root / "link").symlink_to(outside)
+    main = write(root / "main.urscript", '{% include "link" %}')
+    with pytest.raises(ScriptIncludeError, match="outside of the script root"):
+        ScriptReader().read_script_file(main)
+
+
 def test_reader_enforces_restricted_comparison_coercions() -> None:
     data: ScriptData = {"A": True, "X": 5, "S": "hello"}
     assert ScriptReader.evaluate_expression("A == 1", data)
