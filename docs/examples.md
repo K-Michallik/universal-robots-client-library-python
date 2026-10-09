@@ -76,7 +76,15 @@ features exit as explicit skips on unsupported versions.
 
 Important version gates are:
 
-- PolyScope X dashboard state control: 10.12.0 or newer
+- PolyScope X dashboard state control: 10.12.0 or newer, and only in
+  remote control; in local control the dashboard example reads the control
+  mode, reports it, and sends no state-changing commands
+- PolyScope X popup, system-log, shutdown, flight-report, support-file, and
+  robot-information (PolyScope version, model, serial number) dashboard
+  commands: upstream URCL 2.15 gates them on PolyScope X 10.14.0
+  (Robot API 5.0.107). Popups, log entries, shutdown, and flight reports
+  additionally require remote control. The Python PolyScope X backend does
+  not implement these commands yet and raises `NotImplementedError` for them
 - instruction example: UR5-family geometry, with Optimove requiring
   5.21.0 / 10.8.0 or newer
 - friction scales and direct torque: 5.25.1 / 10.12.1 or newer
@@ -122,6 +130,23 @@ their timing is sensitive to shared-runner load; reproduce failures locally
 before treating them as library regressions. CB3 is not part of that matrix.
 Local and CI matrix runs can produce expected skips for controller-version,
 robot-geometry, remote-mode, and program prerequisites.
+
+The PolyScope X entries mirror the upstream URCL 2.15.2 CI matrix:
+
+| Controller | Model | Program folder (`-p`) | Citadel DB (`-c`) | Control mode |
+| --- | --- | --- | --- | --- |
+| 10.11.0 | `ur5e` | `programs/polyscopex` | none | local |
+| 10.12.0 | `ur5e` | `programs/polyscopex/10.12.0/ur5e` | none | local |
+| 10.13.0 | `ur7e` | `programs/polyscopex/10.13.0/ur7e` | `citadelDB/10.13.0` | remote |
+| 10.14.0 | `ur7e` | `programs/polyscopex/10.14.0/ur7e` | `citadelDB/10.14.0` | remote |
+
+Paths are relative to `tests/resources/dockerursim/`. PolyScope X 10.13.0
+and newer persists its settings in a citadel database; the launcher's `-c`
+option mounts a preconditioned copy at `/citadelDB` so the controller boots
+in remote control. The workflow confirms the control mode before running the
+examples, and the dashboard example then exercises its state-changing path.
+Whether every other example behaves the same in remote control has not been
+verified yet, which is one more reason these entries stay advisory.
 
 URSim validates connection, negotiation, command serialization, lifecycle, and
 cleanup. It does not validate physical torque response, contact detection,
