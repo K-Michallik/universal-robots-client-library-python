@@ -212,6 +212,7 @@ def test_background_reader_reconnects_with_full_handshake() -> None:
 
 
 def test_reconnect_does_not_count_socket_outage_as_initialization_failure() -> None:
+    initialization_budget = 2
     server = _FakeRTDEServer()
     port = server.port
     client = RTDEClient(
@@ -223,23 +224,42 @@ def test_reconnect_does_not_count_socket_outage_as_initialization_failure() -> N
     client.connect(
         max_connection_attempts=1,
         reconnection_timeout=0.01,
-        max_initialization_attempts=2,
+        max_initialization_attempts=initialization_budget,
         initialization_timeout=0.01,
     )
     client.start()
-    assert client.get_data_package(timeout=1.0) is not None
+    assert client.get_data_package(timeout=5.0) is not None
+
+    # Count refused connection attempts so the outage provably outlasts the
+    # initialization budget, however slowly the reconnect worker gets scheduled.
+    refused_attempts = 0
+    outage_outlasted_budget = threading.Event()
+    stream_connect = client._stream.connect
+
+    def counting_connect(*args: object, **kwargs: object) -> None:
+        nonlocal refused_attempts
+        try:
+            stream_connect(*args, **kwargs)  # type: ignore[arg-type]
+        except Exception:
+            refused_attempts += 1
+            if refused_attempts > initialization_budget:
+                outage_outlasted_budget.set()
+            raise
+
+    client._stream.connect = counting_connect  # type: ignore[method-assign]
 
     server.close()
-    time.sleep(0.1)
+    assert outage_outlasted_budget.wait(timeout=10.0)
+    assert client.state is not ClientState.RUNNING
     assert client.get_data_package(timeout=0) is None
     replacement = _FakeRTDEServer(port=port)
-    deadline = time.monotonic() + 3.0
+    deadline = time.monotonic() + 10.0
     while client.state is not ClientState.RUNNING and time.monotonic() < deadline:
         time.sleep(0.01)
 
     assert client.state is ClientState.RUNNING
     assert replacement.requested_versions == [2, 1]
-    assert client.get_data_package(timeout=1.0) is not None
+    assert client.get_data_package(timeout=5.0) is not None
 
     client.close()
     replacement.close()
