@@ -396,6 +396,11 @@ class UrDriver:
     """High-level URCL driver without dashboard ownership."""
 
     PRIMARY_CONFIGURATION_TIMEOUT = 10.0
+    # The control script opens the trajectory and script-command sockets
+    # before the reverse socket, but each server accepts on its own thread, so
+    # the reverse connection can be registered first. Bound how long a
+    # program-running notification waits for the other two to catch up.
+    COMPANION_INTERFACE_TIMEOUT = 1.0
 
     def __init__(
         self,
@@ -689,6 +694,8 @@ class UrDriver:
         return f"stop program\ndef externalControl():\n{body}end\n"
 
     def _dispatch_program_state(self, running: bool) -> None:
+        if running:
+            self._await_companion_interfaces()
         with self._callback_lock:
             callbacks = tuple(self._program_callbacks.values())
         configured = self.configuration.handle_program_state
@@ -699,6 +706,31 @@ class UrDriver:
                 callback(running)
             except Exception:
                 _LOGGER.exception("Program-state callback raised")
+
+    def _await_companion_interfaces(self) -> None:
+        """Hold a program-running notification until the robot's other sockets register.
+
+        ``ReverseInterface`` reports the program as running as soon as the reverse
+        socket is accepted. The script connected the trajectory and script-command
+        sockets first, so they are already established, yet their servers may not
+        have accepted them yet. Without this, a caller woken by the notification
+        can find "Script command interface is not connected".
+        """
+        interfaces = tuple(
+            interface
+            for interface in (self._trajectory, self._script_command)
+            if interface is not None
+        )
+        deadline = time.monotonic() + self.COMPANION_INTERFACE_TIMEOUT
+        while not all(interface.is_connected for interface in interfaces):
+            if time.monotonic() >= deadline:
+                _LOGGER.warning(
+                    "Robot program connected to the reverse interface, but not to the "
+                    "trajectory and script-command interfaces within %.1f s",
+                    self.COMPANION_INTERFACE_TIMEOUT,
+                )
+                return
+            time.sleep(0.001)
 
     def subscribe_program_state(self, callback: ProgramStateCallback) -> Unsubscribe:
         if not callable(callback):
