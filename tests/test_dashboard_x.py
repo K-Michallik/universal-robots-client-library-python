@@ -679,3 +679,51 @@ def test_download_support_files_empty_path_is_value_error() -> None:
     client = connected_client(unexpected)
     with pytest.raises(ValueError):
         client.download_support_files("")
+
+
+PROGRAM = {
+    "createdDate": 123,
+    "description": "fixture",
+    "lastModifiedDate": 456,
+    "lastSavedDate": 789,
+    "name": "demo",
+    "programState": "FINAL",
+}
+
+
+def program_list_client(programs: list[dict[str, object]]) -> DashboardClientX:
+    return connected_client(
+        lambda _request: response(200, {"programs": programs}), version="3.1.4"
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("createdDate", ProgramInformation(0, "fixture", 456, 789, "demo", "FINAL")),
+        ("description", ProgramInformation(123, "", 456, 789, "demo", "FINAL")),
+        ("lastModifiedDate", ProgramInformation(123, "fixture", 0, 789, "demo", "FINAL")),
+        ("lastSavedDate", ProgramInformation(123, "fixture", 456, 0, "demo", "FINAL")),
+        ("programState", ProgramInformation(123, "fixture", 456, 789, "demo", "")),
+    ],
+)
+def test_program_list_tolerates_each_nullable_field(
+    field: str, expected: ProgramInformation
+) -> None:
+    other = dict(PROGRAM, name="other")
+    client = program_list_client([dict(PROGRAM, **{field: None}), other])
+    programs = client.get_program_list()
+    assert programs[0] == expected
+    assert programs[1].name == "other"
+
+
+def test_program_list_tolerates_all_nullable_fields_at_once() -> None:
+    nulls = {key: None for key in PROGRAM if key != "name"}
+    client = program_list_client([dict(PROGRAM, **nulls)])
+    assert client.get_program_list() == (ProgramInformation(0, "", 0, 0, "demo", ""),)
+
+
+def test_program_list_still_requires_name() -> None:
+    client = program_list_client([dict(PROGRAM, name=None)])
+    with pytest.raises(ProtocolError, match="'name'"):
+        client.get_program_list()

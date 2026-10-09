@@ -423,6 +423,15 @@ class DashboardClientX:
             raise ProtocolError(f"{source} has no string {field!r} field")
         return value
 
+    @staticmethod
+    def _nullable_string(payload: dict[str, Any], field: str, source: str) -> str:
+        value = payload.get(field)
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ProtocolError(f"{source} field {field!r} must be a string or null")
+        return value
+
     def _require_command(self, command: str) -> _RobotAPICommand:
         """Return ``command``'s table entry or raise if the API is too old.
 
@@ -744,10 +753,14 @@ class DashboardClientX:
         for raw_program in raw_programs:
             if not isinstance(raw_program, dict):
                 raise ProtocolError("program-list entry must be an object")
+            # The Robot API schema declares every field except "name" as
+            # nullable; null dates map to 0 and null strings to "".
             result.append(
                 ProgramInformation(
-                    created_date=self._required_int(raw_program, "createdDate"),
-                    description=self._string_field(
+                    created_date=self._required_int(
+                        raw_program, "createdDate", nullable=True
+                    ),
+                    description=self._nullable_string(
                         raw_program, "description", "program metadata"
                     ),
                     last_modified_date=self._required_int(
@@ -757,7 +770,7 @@ class DashboardClientX:
                         raw_program, "lastSavedDate", nullable=True
                     ),
                     name=self._string_field(raw_program, "name", "program metadata"),
-                    program_state=self._string_field(
+                    program_state=self._nullable_string(
                         raw_program, "programState", "program metadata"
                     ),
                 )
