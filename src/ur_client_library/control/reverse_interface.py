@@ -120,7 +120,7 @@ class ReverseInterface:
             self._server.start()
         except OSError as exc:
             raise URCLConnectionError(
-                f"Could not start reverse interface on port {self._config.port}"
+                f"Could not start reverse interface on port {self._config.port}: {exc}"
             ) from exc
         if not already_running:
             self._notify_program_state(False)
