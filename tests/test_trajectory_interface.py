@@ -7,6 +7,8 @@ import pytest
 
 from test_control_protocols import FakeServer, unpack
 from ur_client_library.control import (
+    MULT_JOINTSTATE,
+    MULT_VEL_ACC,
     MotionType,
     MoveCPrimitive,
     MoveJPrimitive,
@@ -20,6 +22,7 @@ from ur_client_library.control import (
     motion_type_to_string,
     trajectory_result_to_string,
 )
+from ur_client_library.control._serialization import INT32_MAX
 from ur_client_library.exceptions import InvalidRangeError
 from ur_client_library.types import Pose, Q
 from ur_client_library.ur.robot_receive_timeout import RobotReceiveTimeout
@@ -70,6 +73,115 @@ def test_spline_layout_uses_microseconds_and_spline_type() -> None:
     )
     words = unpack(TrajectoryPointInterface.serialize_motion_primitive(primitive))
     assert words[18:] == (1_234_567, 2, MotionType.SPLINE)
+    assert words[:6] == (1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000, 6_000_000)
+    assert words[12:18] == (
+        10_000_000,
+        20_000_000,
+        30_000_000,
+        40_000_000,
+        50_000_000,
+        60_000_000,
+    )
+
+
+def test_spline_near_zero_vel_acc_survive_encoding() -> None:
+    velocities = (1e-5, -1e-5, 3.4e-6, -3.4e-6, 9.9e-5, -9.9e-5)
+    accelerations = (2.3e-5, -2.3e-5, 7e-6, -7e-6, 5.5e-5, -5.5e-5)
+    primitive = SplinePrimitive((0,) * 6, velocities, accelerations, duration=0.02)
+    words = unpack(TrajectoryPointInterface.serialize_motion_primitive(primitive))
+
+    resolution = 1 / MULT_VEL_ACC
+    for sent, received in zip((*velocities, *accelerations), words[6:18], strict=True):
+        assert received != 0
+        assert sent == pytest.approx(received / MULT_VEL_ACC, abs=resolution / 2)
+
+    tiny = SplinePrimitive((0,) * 6, (1e-7,) * 6, (1e-7,) * 6, duration=0.02)
+    tiny_words = unpack(TrajectoryPointInterface.serialize_motion_primitive(tiny))
+    assert tiny_words[6:18] == (10,) * 12
+    legacy_words = unpack(
+        TrajectoryPointInterface.serialize_motion_primitive(
+            tiny, vel_acc_multiplier=MULT_JOINTSTATE
+        )
+    )
+    assert legacy_words[6:18] == (0,) * 12
+
+
+def test_spline_vel_acc_out_of_range_is_rejected() -> None:
+    max_vel_acc = INT32_MAX / MULT_VEL_ACC
+    in_range = (0, 0, 0, 0, 0, max_vel_acc - 1.0)
+    out_of_range = (0, 0, 0, 0, 0, -(max_vel_acc + 1.0))
+
+    with pytest.raises(InvalidRangeError, match="velocity or acceleration out of range"):
+        TrajectoryPointInterface.serialize_motion_primitive(
+            SplinePrimitive((0,) * 6, out_of_range, in_range, duration=0.02)
+        )
+    with pytest.raises(InvalidRangeError, match="velocity or acceleration out of range"):
+        TrajectoryPointInterface.serialize_motion_primitive(
+            SplinePrimitive((0,) * 6, in_range, out_of_range, duration=0.02)
+        )
+    TrajectoryPointInterface.serialize_motion_primitive(
+        SplinePrimitive((0,) * 6, in_range, in_range, duration=0.02)
+    )
+    # The legacy multiplier has a correspondingly larger range.
+    TrajectoryPointInterface.serialize_motion_primitive(
+        SplinePrimitive((0,) * 6, out_of_range, None, duration=0.02),
+        vel_acc_multiplier=MULT_JOINTSTATE,
+    )
+
+
+def test_legacy_vel_acc_multiplier_encodes_spline_like_joint_state() -> None:
+    server = FakeServer(50003)
+    interface = TrajectoryPointInterface(server=server)
+    server.connect_client()
+    interface.set_vel_acc_multiplier(MULT_JOINTSTATE)
+    assert interface.vel_acc_multiplier == MULT_JOINTSTATE
+
+    positions = (1.2, 3.1, 2.2, -1.4, -2.1, -3.2)
+    velocities = (2.2, 2.1, 3.2, -2.4, -3.1, -2.2)
+    accelerations = (3.2, 1.1, 1.2, -3.4, -1.1, -1.2)
+    interface.write_trajectory_spline_point(
+        positions, velocities, accelerations, goal_time=0.5
+    )
+
+    words = unpack(server.writes[-1])
+    assert words[:18] == tuple(
+        round(value * MULT_JOINTSTATE) for value in (*positions, *velocities, *accelerations)
+    )
+
+
+def test_set_vel_acc_multiplier_rejects_invalid_values() -> None:
+    interface = TrajectoryPointInterface(server=FakeServer(50003))
+    assert interface.vel_acc_multiplier == MULT_VEL_ACC
+    for invalid in (0, -1, INT32_MAX + 1):
+        with pytest.raises(InvalidRangeError):
+            interface.set_vel_acc_multiplier(invalid)
+    with pytest.raises(TypeError):
+        interface.set_vel_acc_multiplier(cast(int, True))
+    with pytest.raises(TypeError):
+        interface.set_vel_acc_multiplier(cast(int, 1e8))
+    with pytest.raises(InvalidRangeError):
+        TrajectoryPointInterface.serialize_motion_primitive(
+            MoveJPrimitive(Q(0, 0, 0, 0, 0, 0)), vel_acc_multiplier=0
+        )
+    assert interface.vel_acc_multiplier == MULT_VEL_ACC
+
+
+def test_non_spline_blocks_ignore_vel_acc_multiplier() -> None:
+    server = FakeServer(50003)
+    interface = TrajectoryPointInterface(server=server)
+    server.connect_client()
+    assert interface.vel_acc_multiplier == MULT_VEL_ACC
+    target = Pose(0.1, -0.2, 0.3, -0.4, 0.5, -0.6, Q(1, 2, 3, 4, 5, 6))
+    interface.write_motion_primitive(
+        MoveLPrimitive(target, duration=0.5, acceleration=0.7, velocity=0.6)
+    )
+    words = unpack(server.writes[-1])
+    assert words[6:12] == (1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000, 6_000_000)
+    assert words[12:18] == (600_000, 700_000, 1_000_000, 0, 0, 0)
+
+    movec = MoveCPrimitive(Q(0, 0, 0, 0, 0, 0), Q(1, 1, 1, 1, 1, 1), velocity=0.25)
+    interface.write_motion_primitive(movec)
+    assert unpack(server.writes[-1])[12:15] == (250_000, 1_400_000, 0)
 
 
 def test_invalid_primitive_and_duration_are_rejected() -> None:
