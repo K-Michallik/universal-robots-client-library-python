@@ -558,10 +558,7 @@ class PrimaryClient:
                     or (fail_on_warnings and error.report_level == ReportLevel.WARNING)
                     or error.message_code == 210
                 ]
-                details = "\n".join(
-                    f"{error.code}: {error.text} (severity {self._level_name(error.report_level)})"
-                    for error in reportable
-                )
+                details = "\n".join(self._format_error_code(error) for error in reportable)
                 if read_only:
                     raise ReadOnlyInterfaceError(
                         "Script cannot execute because the Primary interface is read-only"
@@ -621,6 +618,14 @@ class PrimaryClient:
                     " " * (width + 2 + exception.column_number - 1) + "^<--- here"
                 )
         return "\n".join(lines)
+
+    @classmethod
+    def _format_error_code(cls, error: ErrorCode) -> str:
+        controller_text = f" [controller: {error.text}]" if error.text else ""
+        return (
+            f"{error.description}{controller_text} "
+            f"(severity {cls._level_name(error.report_level)})"
+        )
 
     @staticmethod
     def _level_name(level: ReportLevel | int) -> str:

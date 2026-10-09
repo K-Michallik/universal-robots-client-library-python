@@ -261,6 +261,26 @@ def test_script_feedback_reports_fault_and_stops_program() -> None:
     assert transport.writes[-1] == "stop program\n"
 
 
+def test_script_feedback_error_message_uses_error_code_description() -> None:
+    client, transport = connected_client()
+
+    def respond(script: str) -> None:
+        if "movel" in script:
+            client.process_package(error(100, ReportLevel.FAULT, "controller detail"))
+            client.process_package(error(99999, ReportLevel.FAULT, ""))
+
+    transport.callback = respond
+
+    with pytest.raises(RobotErrorCodeError) as raised:
+        client.send_script_blocking("movel(p[10,0,0,0,0,0])", "faulty")
+    message = str(raised.value)
+    assert (
+        "C100A0: Robot mode changed to: DISCONNECTED [controller: controller detail] "
+        "(severity FAULT)"
+    ) in message
+    assert "C99999A0 (severity FAULT)" in message
+
+
 def test_warning_policy_and_feedback_draining_apis() -> None:
     client, transport = connected_client()
 
