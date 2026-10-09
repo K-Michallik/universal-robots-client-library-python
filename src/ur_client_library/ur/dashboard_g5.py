@@ -595,7 +595,8 @@ class DashboardClientG5:
     def is_in_remote_control(self) -> bool:
         return self.send_request("is in remote control") == "true"
 
-    def popup(self, popup_text: str) -> DashboardResponse:
+    def popup(self, popup_text: str, popup_title: str = "") -> DashboardResponse:
+        # The G5 dashboard has no popup title; it exists for PolyScope X.
         return self._response(self.send_request("popup", payload=popup_text))
 
     def add_to_log(self, log_text: str) -> DashboardResponse:
@@ -683,7 +684,7 @@ class DashboardClientG5:
         finally:
             self.receive_timeout = configured
 
-    def generate_flight_report(self, report_type: str) -> DashboardResponse:
+    def generate_flight_report(self, report_type: str = "") -> DashboardResponse:
         return self._request_with_temporary_timeout(
             180.0,
             "generate flight report",
@@ -697,6 +698,11 @@ class DashboardClientG5:
             "generate support file",
             r"(?:Completed successfully:).*",
             directory_path,
+        )
+
+    def download_support_files(self, save_path: str | Path) -> DashboardResponse:
+        raise NotImplementedError(
+            "support-file download is only available on PolyScope X"
         )
 
     def save_log(self) -> DashboardResponse:
@@ -783,6 +789,7 @@ class DashboardClientG5:
     command_get_user_role = get_user_role
     command_generate_flight_report = generate_flight_report
     command_generate_support_file = generate_support_file
+    command_download_support_files = download_support_files
     command_save_log = save_log
     command_get_program_list = get_program_list
     command_upload_program = upload_program

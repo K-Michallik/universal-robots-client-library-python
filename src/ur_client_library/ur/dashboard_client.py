@@ -68,7 +68,10 @@ class DashboardClient:
     """Transport-selecting dashboard facade.
 
     ``backend`` is mandatory: transport selection never probes the controller
-    and construction performs no network I/O.
+    and construction performs no network I/O. Command methods are delegated to
+    the selected backend, so backend-specific operations such as PolyScope X's
+    ``download_support_files`` raise :class:`NotImplementedError` on G5, and
+    PolyScope X commands gated on a newer Robot API raise it on older robots.
     """
 
     ClientPolicy = DashboardClientPolicy
@@ -135,9 +138,11 @@ class DashboardClient:
 
     @property
     def polyscope_version(self) -> VersionInformation:
-        """The legacy PolyScope version.
+        """The PolyScope version.
 
-        PolyScope X does not expose this query and raises
+        G5 returns the version cached at connect. PolyScope X queries the
+        marketing version from the Robot API on every read; Robot API versions
+        older than 5.0.107 (PolyScope 10.14.0) raise
         :class:`NotImplementedError`.
         """
 

@@ -102,16 +102,50 @@ from ur_client_library.comm import Pipeline
 The Python backends preserve upstream's intentionally unequal feature sets.
 
 - G5 does not implement `resume()` (use `play()`), program listing, upload,
-  update, or download.
-- PolyScope X does not implement installation loading, popup/logging helpers,
-  shutdown, legacy version/model/serial queries, safety-status query,
-  operational-mode mutation, user roles, flight/support reports, log saving,
-  or raw TCP/regex/retry helpers.
-- PolyScope X program list/upload/update/download operations require Robot API
-  3.1.4 (PolyScope 10.12.0) or newer.
+  update, or download, or `download_support_files()`. G5 accepts and ignores
+  the `popup()` title.
+- PolyScope X does not implement installation loading, `running()`,
+  program-saved and safety-status queries, operational-mode mutation, user
+  roles, `generate_support_file()`, log saving, or raw TCP/regex/retry
+  helpers.
+- PolyScope X commands are gated per command on the connected Robot API
+  version, mirroring upstream's command table:
 
-Unsupported operations raise `NotImplementedError` rather than silently
+  | Robot API (PolyScope) | Commands |
+  | --- | --- |
+  | 3.1.4 (10.12.0) | `get_loaded_program`, `get_program_list`, `upload_program`, `update_program`, `download_program`, `robot_mode`, `safety_mode`, `get_operational_mode`, `is_in_remote_control` |
+  | 5.0.107 (10.14.0) | `popup(text, title="")`, `close_popup`, `close_safety_popup`, `shutdown`, `add_to_log`, `get_polyscope_version` / `polyscope_version`, `get_robot_model`, `get_serial_number`, `generate_flight_report`, `download_support_files` |
+
+  `load_program()` uses `/program/v1/load` below Robot API 3.1.4 and
+  `/program/v1/loaded` from 3.1.4 on.
+- On PolyScope X, `get_polyscope_version()` returns the parsed
+  `marketingVersion` of `/versions/v1` as `VersionInformation`, and the
+  `polyscope_version` property performs that query on every read (G5 returns
+  the version cached at connect). Below Robot API 5.0.107 both raise
+  `NotImplementedError`.
+- PolyScope X `generate_flight_report()` ignores `report_type` with a logged
+  warning and raises the read timeout to 30 s for that request only.
+- PolyScope X `download_support_files(save_path)` streams the zip archive into
+  a temporary file beside `save_path` and atomically replaces `save_path` once
+  the body is complete; a 204 response yields an empty file. The temporary
+  file is removed on every failure, and the saved file has the temporary
+  file's owner-only permissions, as upstream.
+
+Unsupported operations, including PolyScope X commands that the connected
+Robot API is too old for, raise `NotImplementedError` rather than silently
 falling back to a different transport.
+
+PolyScope X deliberately differs from upstream in two contracts:
+
+- Lifecycle: upstream connects on demand when a command runs on a
+  disconnected client. The Python client keeps its explicit lifecycle and
+  raises `LifecycleError` until `connect()` succeeds.
+- Errors: upstream returns `ok=false` for a non-2xx answer. Python raises
+  `DashboardCommandError` carrying the HTTP status and response body; every
+  2xx answer (for example 202 from `shutdown()`) is success. Transport
+  failures raise `URCLConnectionError` or `URCLTimeoutError`. Local
+  filesystem failures in `download_support_files()` (missing directory,
+  failed replace) raise `OSError` where upstream returns `ok=false`.
 
 ## Concurrency
 
