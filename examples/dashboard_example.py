@@ -76,7 +76,10 @@ def run(args: argparse.Namespace) -> None:
                     print(f"PolyScope version: {dashboard.polyscope_version}")
                     dashboard.close_safety_popup()
                 elif remote_control:
-                    dashboard.power_off()
+                    # As upstream, ignore the result: the Robot API rejects
+                    # powering off an already powered-off robot (HTTP 409).
+                    with suppress(DashboardCommandError):
+                        dashboard.power_off()
 
                 if version.major >= 10 and not remote_control:
                     print("PolyScope X is not in remote control; no state-changing commands sent.")
