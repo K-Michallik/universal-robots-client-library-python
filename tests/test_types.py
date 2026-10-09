@@ -33,3 +33,17 @@ def test_integer_validation_checks_bounds() -> None:
     assert validate_ints(range(6), 6, name="words", minimum=0, maximum=5) == tuple(range(6))
     with pytest.raises(ValueError):
         validate_ints(range(6), 6, name="words", maximum=4)
+
+
+def test_to_string_uses_cpp_ostream_number_formatting() -> None:
+    q = Q(0.0, -0.0, 1.0 / 3.0, 1234567.0, 1e-5, -2.5)
+    assert q.to_string() == "Q([0, -0, 0.333333, 1.23457e+06, 1e-05, -2.5])"
+    assert str(q) == q.to_string()
+    assert repr(q).startswith("Q(values=")
+
+    pose = Pose(1.0, 2.0, 3.0, 0.1, 0.2, 0.3, Q(0, 1, 2, 3, 4, 5))
+    assert pose.to_string() == (
+        "Pose(x = 1, y = 2, z = 3, rx = 0.1, ry = 0.2, rz = 0.3)\nWith Q_near([0, 1, 2, 3, 4, 5])"
+    )
+    assert f"{pose}" == pose.to_string()
+    assert repr(pose).startswith("Pose(x=1.0")
