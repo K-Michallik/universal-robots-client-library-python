@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -115,7 +116,9 @@ def confirm_start(
 
 def run_cli(action: Callable[[], None]) -> int:
     """Translate example exceptions into consistent process exit codes."""
-    configure_logging(logging.INFO)
+    # URCL_LOG_LEVEL lets CI raise verbosity (e.g. DEBUG) to trace interface
+    # connects and drops without editing every example.
+    configure_logging(os.environ.get("URCL_LOG_LEVEL", "INFO").upper())
     try:
         action()
     except ExampleSkipped as exc:

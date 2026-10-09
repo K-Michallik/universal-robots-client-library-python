@@ -1,0 +1,89 @@
+name: Program handover stress (temporary)
+
+# Temporary diagnostics for the intermittent "robot connects, then drops"
+# failures. Repeats the force_mode -> full_driver handover, which is where the
+# examples workflow loses the connection most often, and keeps going after a
+# failure so one job yields a failure rate instead of a single bit.
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: ur5e
+            version: 5.9.4
+          - model: ur5e
+            version: 10.11.0
+          - model: ur5e
+            version: 10.12.0
+          - model: ur7e
+            version: 10.13.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - run: python -m pip install -e .
+      - name: Start URSim
+        run: |
+          chmod +x scripts/start_ursim.sh
+          scripts/start_ursim.sh -m "${{ matrix.model }}" -v "${{ matrix.version }}"
+      - name: Wait for PolyScope X to become controllable
+        if: startsWith(matrix.version, '10.')
+        run: python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101
+      - name: Repeat force_mode -> full_driver
+        env:
+          URCL_LOG_LEVEL: DEBUG
+          ITERATIONS: "30"
+        run: |
+          python scripts/primary_monitor.py --robot-ip 192.168.56.101 > primary-monitor.log 2>&1 &
+          monitor=$!
+          failures=0
+          for i in $(seq 1 "$ITERATIONS"); do
+            echo "==== iteration $i $(date +%H:%M:%S.%N | cut -c1-12)"
+            if ! python run_examples.py --simulator --robot-ip 192.168.56.101 \
+                --only examples.force_mode_example --only examples.full_driver \
+                --duration 3 > "iter-$i.log" 2>&1; then
+              failures=$((failures + 1))
+              echo "---- iteration $i FAILED"
+              cat "iter-$i.log"
+            fi
+          done
+          kill "$monitor" || true
+          wait "$monitor" || true
+          echo "STRESS SUMMARY ${{ matrix.version }}: $failures failed of $ITERATIONS"
+          grep -h "failed with exit status\|URCL failure" iter-*.log | sort | uniq -c || true
+          echo "$failures" > failures.txt
+      - name: Print primary monitor
+        if: always()
+        run: cat primary-monitor.log || true
+      - name: Capture URSim log
+        if: always()
+        run: |
+          sleep 5
+          docker logs ursim > "ursim-${{ matrix.version }}-${{ matrix.model }}.log" 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stress-${{ matrix.version }}-${{ matrix.model }}
+          path: |
+            ursim-*.log
+            iter-*.log
+            primary-monitor.log
+            failures.txt
+          if-no-files-found: warn
+          retention-days: 10
+      - name: Stop URSim
+        if: always()
+        run: docker rm -f ursim >/dev/null 2>&1 || true

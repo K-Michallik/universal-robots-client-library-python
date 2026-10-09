@@ -825,6 +825,7 @@ class UrDriver:
             raise LifecycleError("send_robot_program is only valid in headless mode")
         if not self._full_robot_program:
             raise LifecycleError("The headless robot program has not been rendered")
+        _LOGGER.debug("Sending headless external-control program")
         self.send_script(self._full_robot_program)
 
     def write_joint_command(
@@ -849,6 +850,7 @@ class UrDriver:
         self._require(self._reverse, "Reverse interface").write(None, ControlMode.IDLE, timeout)
 
     def stop_control(self) -> None:
+        _LOGGER.debug("Sending stop-control command")
         self._require(self._reverse, "Reverse interface").write(None, ControlMode.STOPPED)
 
     def write_trajectory_control_message(
