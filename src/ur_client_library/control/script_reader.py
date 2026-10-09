@@ -126,10 +126,15 @@ class ScriptReader:
 
     @staticmethod
     def _resolve(path: Path, raw: str, context: str) -> Path:
-        # Non-strict resolution collapses ``..`` and follows symlinks so containment
-        # checks see the real target; a missing file is reported by the read instead.
+        # Resolution collapses ``..`` and follows symlinks so containment checks see
+        # the real target. Strict mode makes symlink loops fail here on every Python
+        # (3.13's non-strict resolve() silently leaves a loop unresolved); a missing
+        # file falls back to non-strict resolution and is reported by the read instead.
         try:
-            return path.resolve()
+            try:
+                return path.resolve(strict=True)
+            except FileNotFoundError:
+                return path.resolve()
         except (OSError, RuntimeError) as exc:
             raise ScriptFileError(f"Could not resolve {context} {raw!r}: {exc}") from exc
 
