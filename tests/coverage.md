@@ -17,6 +17,9 @@ This is a behavioral validation ledger, not a measured line-coverage report.
   and timeout-free blocking reads
 - Primary package parsing, strict/lenient fallback, snapshots, commands, and
   blocking script feedback
+- Error-code text lookup (override, exact, code-only, fallback), C100 robot-mode
+  override, consumer log-level mapping, and regeneration of the checked-in
+  table from the URCL 2.15.2 header (skipped without a local URCL checkout)
 - Reverse, trajectory, script-command, ScriptReader, ScriptSender, and tool
   communication wire protocols
 - G5 dashboard TCP and PolyScope X HTTP transports

@@ -11,6 +11,7 @@ from ur_client_library.exceptions import (
     RobotRuntimeError,
     ScriptSyntaxError,
     URCLTimeoutError,
+    WorkerThreadError,
 )
 from ur_client_library.primary import (
     ErrorCodeMessage,
@@ -183,6 +184,36 @@ def test_started_reader_parses_frames_into_current_snapshots() -> None:
     assert not client.is_running
 
 
+@pytest.mark.parametrize("package_size", [4, 65536, 0x7FFFFFFF])
+def test_reader_rejects_out_of_range_package_size_without_reading_body(
+    package_size: int,
+) -> None:
+    transport = StreamingFakeTransport()
+    requested: list[int] = []
+    original_read = transport.read
+
+    def recording_read(size: int) -> bytes:
+        requested.append(size)
+        return original_read(size)
+
+    transport.read = recording_read  # type: ignore[method-assign]
+    client = PrimaryClient("127.0.0.1", transport=transport)
+    client.connect()
+    client.start()
+    transport.feed(struct.pack(">i", package_size) + b"\x10" * 16)
+
+    reader = client._reader
+    assert reader is not None
+    reader.join(1.0)
+    assert not client.is_running
+    with pytest.raises(WorkerThreadError) as raised:
+        client.pop_error_codes()
+    assert isinstance(raised.value.cause, ValueError)
+    assert f"Invalid Primary package size {package_size}" in str(raised.value)
+    assert requested == [4]
+    client.close()
+
+
 def test_script_upload_reconnects_and_retries_one_failed_write() -> None:
     transport = FlakyWriteTransport()
     client = PrimaryClient("127.0.0.1", transport=transport)
@@ -259,6 +290,26 @@ def test_script_feedback_reports_fault_and_stops_program() -> None:
     with pytest.raises(RobotErrorCodeError, match="C999A0"):
         client.send_script_blocking("movel(p[10,0,0,0,0,0])", "faulty")
     assert transport.writes[-1] == "stop program\n"
+
+
+def test_script_feedback_error_message_uses_error_code_description() -> None:
+    client, transport = connected_client()
+
+    def respond(script: str) -> None:
+        if "movel" in script:
+            client.process_package(error(100, ReportLevel.FAULT, "controller detail"))
+            client.process_package(error(99999, ReportLevel.FAULT, ""))
+
+    transport.callback = respond
+
+    with pytest.raises(RobotErrorCodeError) as raised:
+        client.send_script_blocking("movel(p[10,0,0,0,0,0])", "faulty")
+    message = str(raised.value)
+    assert (
+        "C100A0: Robot mode changed to: DISCONNECTED [controller: controller detail] "
+        "(severity FAULT)"
+    ) in message
+    assert "C99999A0 (severity FAULT)" in message
 
 
 def test_warning_policy_and_feedback_draining_apis() -> None:

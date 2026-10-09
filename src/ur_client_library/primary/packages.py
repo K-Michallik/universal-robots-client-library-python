@@ -9,6 +9,7 @@ from enum import IntEnum
 from ur_client_library.helpers import calibration_hash
 from ur_client_library.types import Vector6
 from ur_client_library.ur.datatypes import ReportLevel, RobotMode, SafetyMode
+from ur_client_library.ur.error_codes import error_code_text
 from ur_client_library.ur.version_information import VersionInformation
 
 UR_PRIMARY_PORT = 30001
@@ -253,6 +254,12 @@ class KeyMessage(RobotMessage):
         return len(self.title.encode())
 
 
+def _describe_error_code(message_code: int, message_argument: int) -> str:
+    code = f"C{message_code}A{message_argument}"
+    text = error_code_text(message_code, message_argument)
+    return code if text is None else f"{code}: {text}"
+
+
 @dataclass(frozen=True, slots=True)
 class ErrorCode:
     message_code: int = -1
@@ -267,6 +274,15 @@ class ErrorCode:
     def code(self) -> str:
         return f"C{self.message_code}A{self.message_argument}"
 
+    @property
+    def description(self) -> str:
+        """``C<code>A<arg>: <text>`` from the error-code table, else :attr:`code`.
+
+        Mirrors upstream ``ErrorCodeMessage::toString()``; :attr:`text` keeps the
+        controller-supplied payload.
+        """
+        return _describe_error_code(self.message_code, self.message_argument)
+
 
 @dataclass(frozen=True, slots=True)
 class ErrorCodeMessage(RobotMessage):
@@ -280,6 +296,15 @@ class ErrorCodeMessage(RobotMessage):
     @property
     def code(self) -> str:
         return f"C{self.message_code}A{self.message_argument}"
+
+    @property
+    def description(self) -> str:
+        """``C<code>A<arg>: <text>`` from the error-code table, else :attr:`code`.
+
+        Mirrors upstream ``ErrorCodeMessage::toString()``; :attr:`text` keeps the
+        controller-supplied payload.
+        """
+        return _describe_error_code(self.message_code, self.message_argument)
 
     def to_error_code(self) -> ErrorCode:
         return ErrorCode(
