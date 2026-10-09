@@ -1,6 +1,6 @@
 # Lifecycle, threading, and safety
 
-This package preserves URCL 2.14.0 protocol behavior while exposing explicit
+This package preserves URCL 2.15.2 protocol behavior while exposing explicit
 Python lifecycle methods.
 
 ## Object lifecycle

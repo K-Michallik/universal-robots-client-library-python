@@ -1,7 +1,7 @@
 # Python examples
 
 The `examples` package ports the 17 executables built by the upstream URCL
-2.14.0 `examples/CMakeLists.txt`. The ports preserve protocol behavior while
+2.15.2 `examples/CMakeLists.txt`. The ports preserve protocol behavior while
 using Python lifecycle, naming, exception, and callback conventions.
 
 ## Running an example
@@ -81,10 +81,9 @@ Important version gates are:
   mode, reports it, and sends no state-changing commands
 - PolyScope X popup, system-log, shutdown, flight-report, support-file, and
   robot-information (PolyScope version, model, serial number) dashboard
-  commands: upstream URCL 2.15 gates them on PolyScope X 10.14.0
-  (Robot API 5.0.107). Popups, log entries, shutdown, and flight reports
-  additionally require remote control. The Python PolyScope X backend does
-  not implement these commands yet and raises `NotImplementedError` for them
+  commands: PolyScope X 10.14.0 (Robot API 5.0.107) or newer; older
+  versions raise `NotImplementedError`. Popups, log entries, shutdown, and
+  flight reports additionally require remote control
 - instruction example: UR5-family geometry, with Optimove requiring
   5.21.0 / 10.8.0 or newer
 - friction scales and direct torque: 5.25.1 / 10.12.1 or newer
