@@ -63,6 +63,12 @@ def test_data_package_missing_key_uses_domain_and_mapping_error_contract() -> No
         _ = package["actual_q"]
 
     assert isinstance(raised.value, KeyError)
+    assert raised.value.invalid_keys == ("actual_q",)
+    assert str(raised.value) == "'actual_q' is not part of this RTDE recipe"
+
+    with pytest.raises(RTDEInvalidKeyError) as unknown:
+        DataPackage(("timestamp", "nope_a", "nope_b"))
+    assert unknown.value.invalid_keys == ("nope_a", "nope_b")
 
 
 def test_parser_and_requests_match_upstream_wire_bytes() -> None:

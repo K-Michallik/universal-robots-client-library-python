@@ -101,7 +101,19 @@ class UnknownVariableError(URCLException, KeyError):
 
 
 class RTDEInvalidKeyError(URCLException, KeyError):
-    """An RTDE package key is not part of its recipe."""
+    """An RTDE recipe or package key is unknown or unavailable.
+
+    ``invalid_keys`` lists every offending key so callers can react to them
+    programmatically instead of parsing the message.
+    """
+
+    def __init__(self, message: str = "", *, invalid_keys: Sequence[str] = ()) -> None:
+        self.invalid_keys: tuple[str, ...] = tuple(invalid_keys)
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        # KeyError.__str__ would repr() the message; keep it human-readable.
+        return str(self.args[0]) if self.args else ""
 
 
 class RTDEInputConflictError(URCLException):
