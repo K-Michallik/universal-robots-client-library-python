@@ -43,6 +43,15 @@ def validate_ints(
     return normalized
 
 
+def _format_double(value: float) -> str:
+    # Matches a default-configured C++ ostream: %g with six significant digits.
+    return format(value, "g")
+
+
+def _format_joint_values(values: Iterable[float]) -> str:
+    return "[" + ", ".join(_format_double(value) for value in values) + "]"
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class Q:
     """Six joint positions in radians."""
@@ -66,6 +75,13 @@ class Q:
 
     def __getitem__(self, index: int) -> float:
         return self.values[index]
+
+    def to_string(self) -> str:
+        """Return the upstream ``Q::toString()`` text, e.g. ``Q([0, 0.1, ...])``."""
+        return f"Q({_format_joint_values(self.values)})"
+
+    def __str__(self) -> str:
+        return self.to_string()
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +113,23 @@ class Pose:
 
     def __getitem__(self, index: int) -> float:
         return self.values[index]
+
+    def to_string(self) -> str:
+        """Return the upstream ``Pose::toString()`` text.
+
+        A ``q_near`` hint is appended on a second line as ``With Q_near([...])``.
+        """
+        text = (
+            f"Pose(x = {_format_double(self.x)}, y = {_format_double(self.y)}, "
+            f"z = {_format_double(self.z)}, rx = {_format_double(self.rx)}, "
+            f"ry = {_format_double(self.ry)}, rz = {_format_double(self.rz)})"
+        )
+        if self.q_near is not None:
+            text += f"\nWith Q_near({_format_joint_values(self.q_near.values)})"
+        return text
+
+    def __str__(self) -> str:
+        return self.to_string()
 
 
 MotionTarget: TypeAlias = Q | Pose

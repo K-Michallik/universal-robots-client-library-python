@@ -8,7 +8,9 @@ from ur_client_library.helpers import (
     robot_type_from_string,
     round_half_away_from_zero,
     split_string,
+    string_from_motion_target,
 )
+from ur_client_library.types import Pose, Q
 from ur_client_library.ur.datatypes import RobotSeries, RobotType
 from ur_client_library.ur.version_information import VersionInformation
 
@@ -55,3 +57,18 @@ def test_libstdcxx_hash_known_values() -> None:
 def test_calibration_hash_matches_upstream_serialization_order() -> None:
     zeros = [0.0] * 6
     assert calibration_hash(zeros, zeros, zeros, zeros) == "calib_8811247710799071897"
+
+
+def test_string_from_motion_target_matches_upstream() -> None:
+    q = Q(0.0, 0.1, 0.2, 0.3, 0.4, 0.5)
+    assert string_from_motion_target(q) == "Q([0, 0.1, 0.2, 0.3, 0.4, 0.5])"
+
+    pose = Pose(1.0, 2.0, 3.0, 0.1, 0.2, 0.3)
+    assert (
+        string_from_motion_target(pose) == "Pose(x = 1, y = 2, z = 3, rx = 0.1, ry = 0.2, rz = 0.3)"
+    )
+    pose_with_q_near = Pose(1.0, 2.0, 3.0, 0.1, 0.2, 0.3, q)
+    assert string_from_motion_target(pose_with_q_near) == (
+        "Pose(x = 1, y = 2, z = 3, rx = 0.1, ry = 0.2, rz = 0.3)\n"
+        "With Q_near([0, 0.1, 0.2, 0.3, 0.4, 0.5])"
+    )

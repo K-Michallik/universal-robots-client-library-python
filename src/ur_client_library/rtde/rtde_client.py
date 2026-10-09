@@ -291,24 +291,32 @@ class RTDEClient:
         self._initialization_timeout = initialization_timeout
         self._stop.clear()
         last_error: BaseException | None = None
-        for attempt in range(max_initialization_attempts):
-            try:
-                self._setup_communication()
-                with self._state_lock:
-                    self._state = ClientState.INITIALIZED
-                return
-            except (
-                URCLConnectionError,
-                ProtocolError,
-                RTDEInputConflictError,
-                _RetryHandshake,
-            ) as exc:
-                last_error = exc
-                self._disconnect_transport()
-                if attempt + 1 < max_initialization_attempts and self._stop.wait(
-                    initialization_timeout
-                ):
-                    break
+        try:
+            for attempt in range(max_initialization_attempts):
+                try:
+                    self._setup_communication()
+                    with self._state_lock:
+                        self._state = ClientState.INITIALIZED
+                    return
+                except (
+                    URCLConnectionError,
+                    ProtocolError,
+                    RTDEInputConflictError,
+                    _RetryHandshake,
+                ) as exc:
+                    last_error = exc
+                    self._disconnect_transport()
+                    if attempt + 1 < max_initialization_attempts and self._stop.wait(
+                        initialization_timeout
+                    ):
+                        break
+        except BaseException:
+            # Non-retryable failures (e.g. unknown recipe keys) must not leave
+            # an open stream behind a client that reports INITIALIZING.
+            self._disconnect_transport()
+            with self._state_lock:
+                self._state = ClientState.UNINITIALIZED
+            raise
         with self._state_lock:
             self._state = ClientState.UNINITIALIZED
         raise URCLConnectionError(
@@ -398,10 +406,14 @@ class RTDEClient:
         if not unavailable:
             return
         if not self._ignore_unavailable_outputs:
-            raise ProtocolError(
-                "Robot does not provide RTDE outputs: "
-                + ", ".join(repr(key) for key in unavailable)
+            message = (
+                "The following variables are not recognized by the robot:"
+                + "".join(f"\n  - {key!r}" for key in unavailable)
+                + "\nEither your output recipe contains errors or the urcontrol version "
+                "does not support them."
             )
+            LOGGER.error("%s", message)
+            raise RTDEInvalidKeyError(message, invalid_keys=unavailable)
         available = tuple(key for key in self._output_recipe if key not in unavailable)
         if "timestamp" not in available:
             raise ProtocolError("Robot does not provide required RTDE timestamp output")
@@ -426,7 +438,9 @@ class RTDEClient:
             strict=True,
         ):
             if field_type == "NOT_FOUND":
-                raise RTDEInvalidKeyError(f"Robot does not recognize RTDE input {key!r}")
+                raise RTDEInvalidKeyError(
+                    f"Robot does not recognize RTDE input {key!r}", invalid_keys=(key,)
+                )
             if field_type == "IN_USE":
                 raise RTDEInputConflictError(key)
         self._writer.close()
@@ -707,6 +721,7 @@ class RTDEClient:
                     "RTDE reconnect attempts were exhausted"
                 ) from last_error
             except BaseException as exc:
+                self._disconnect_transport()
                 if not self._stop.is_set():
                     self._store_worker_error("RTDE reconnect", exc)
                 with self._state_lock:

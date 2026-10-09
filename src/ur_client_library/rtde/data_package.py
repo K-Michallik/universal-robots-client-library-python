@@ -210,9 +210,12 @@ class DataPackage(RTDEPackage, MutableMapping[str, RTDEValue]):
             raise ValueError("RTDE data package recipe cannot be empty")
         if len(set(normalized_recipe)) != len(normalized_recipe):
             raise ValueError("RTDE recipe cannot contain duplicate keys")
-        for key in normalized_recipe:
-            if key not in FIELD_TYPES:
-                raise RTDEInvalidKeyError(f"Unknown item in RTDE recipe: {key!r}")
+        unknown = tuple(key for key in normalized_recipe if key not in FIELD_TYPES)
+        if unknown:
+            raise RTDEInvalidKeyError(
+                "Unknown item in RTDE recipe: " + ", ".join(repr(key) for key in unknown),
+                invalid_keys=unknown,
+            )
         self._recipe = normalized_recipe
         self._protocol_version = protocol_version
         self._recipe_id = 0
@@ -245,16 +248,22 @@ class DataPackage(RTDEPackage, MutableMapping[str, RTDEValue]):
         try:
             return self._values[key]
         except KeyError as exc:
-            raise RTDEInvalidKeyError(f"{key!r} is not part of this RTDE recipe") from exc
+            raise RTDEInvalidKeyError(
+                f"{key!r} is not part of this RTDE recipe", invalid_keys=(key,)
+            ) from exc
 
     def __setitem__(self, key: str, value: object) -> None:
         if key not in self._values:
-            raise RTDEInvalidKeyError(f"{key!r} is not part of this RTDE recipe")
+            raise RTDEInvalidKeyError(
+                f"{key!r} is not part of this RTDE recipe", invalid_keys=(key,)
+            )
         self._values[key] = self._normalize(FIELD_TYPES[key], value, key)
 
     def __delitem__(self, key: str) -> None:
         if key not in self._values:
-            raise RTDEInvalidKeyError(f"{key!r} is not part of this RTDE recipe")
+            raise RTDEInvalidKeyError(
+                f"{key!r} is not part of this RTDE recipe", invalid_keys=(key,)
+            )
         raise TypeError("RTDE recipe fields cannot be deleted")
 
     def __iter__(self) -> Iterator[str]:
