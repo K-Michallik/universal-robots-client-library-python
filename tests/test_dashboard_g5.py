@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -238,3 +239,24 @@ def test_facade_requires_explicit_backend_without_constructing_transport() -> No
     assert client.policy is DashboardClientPolicy.G5
     client.connect()
     assert calls == 1
+
+
+def test_popup_title_is_accepted_and_ignored() -> None:
+    client, fake = make_client({"popup hello\n": ["showing popup\n"]})
+    client.connect()
+    response = client.popup("hello", "Ignored title")
+    assert response.message == "showing popup"
+    assert fake.sent[-1] == "popup hello\n"
+
+
+def test_download_support_files_is_polyscope_x_only(tmp_path: Path) -> None:
+    client, fake = make_client()
+    client.connect()
+    for operation in (
+        client.download_support_files,
+        client.command_download_support_files,
+    ):
+        with pytest.raises(NotImplementedError):
+            operation(tmp_path / "support.zip")
+    assert fake.sent == ["PolyscopeVersion\n"]
+    assert list(tmp_path.iterdir()) == []

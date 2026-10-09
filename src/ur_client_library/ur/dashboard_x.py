@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
@@ -27,7 +33,66 @@ from ur_client_library.ur.dashboard_client import (
 )
 from ur_client_library.ur.version_information import VersionInformation
 
-_PROGRAM_API_MINIMUM = VersionInformation.from_string("3.1.4")
+_LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _RobotAPICommand:
+    """Endpoint and minimum versions of one Robot API command."""
+
+    endpoint: str
+    robot_api_version: VersionInformation
+    polyscope_version: VersionInformation
+
+
+_ROBOT_API_3_1_4 = VersionInformation.from_string("3.1.4")
+_POLYSCOPE_10_12_0 = VersionInformation.from_string("10.12.0")
+_ROBOT_API_5_0_107 = VersionInformation.from_string("5.0.107")
+_POLYSCOPE_10_14_0 = VersionInformation.from_string("10.14.0")
+
+
+def _since_10_12(endpoint: str) -> _RobotAPICommand:
+    return _RobotAPICommand(endpoint, _ROBOT_API_3_1_4, _POLYSCOPE_10_12_0)
+
+
+def _since_10_14(endpoint: str) -> _RobotAPICommand:
+    return _RobotAPICommand(endpoint, _ROBOT_API_5_0_107, _POLYSCOPE_10_14_0)
+
+
+# Mirrors upstream ``DashboardClientImplX::g_command_list``. Endpoints are the
+# paths this port requests: upstream's table spells the program collection
+# without the trailing slash it actually requests. The operational-mode
+# entries exist for parity only; as upstream, those operations stay
+# unimplemented.
+_COMMANDS: Mapping[str, _RobotAPICommand] = MappingProxyType(
+    {
+        "get_loaded_program": _since_10_12("/program/v1/loaded"),
+        "get_program_list": _since_10_12("/programs/v1/"),
+        "upload_program": _since_10_12("/programs/v1/"),
+        "update_program": _since_10_12("/programs/v1/"),
+        "download_program": _since_10_12("/programs/v1/"),
+        "robot_mode": _since_10_12("/robotstate/v1/robotmode"),
+        "safety_mode": _since_10_12("/robotstate/v1/safetymode"),
+        "get_operational_mode": _since_10_12("/system/v1/operationalmode"),
+        "is_in_remote_control": _since_10_12("/system/v1/controlmode"),
+        "popup": _since_10_14("/popup/v1"),
+        "close_popup": _since_10_14("/popup/v1"),
+        "close_safety_popup": _since_10_14("/popup/v1/safety"),
+        "PolyscopeVersion": _since_10_14("/versions/v1"),
+        "get_robot_model": _since_10_14("/system/v1/information"),
+        "get_serial_number": _since_10_14("/system/v1/information"),
+        "shutdown": _since_10_14("/system/v1/shutdown"),
+        "add_to_log": _since_10_14("/system/v1/log"),
+        "generate_flight_report": _since_10_14("/supportfiles/v1"),
+        "download_support_files": _since_10_14("/supportfiles/v1"),
+        "set_operational_mode": _since_10_14("/operational-mode/v1"),
+        "clear_operational_mode": _since_10_14("/operational-mode/v1"),
+    }
+)
+
+# Upstream raises the read timeout to this while the robot builds a report.
+_FLIGHT_REPORT_TIMEOUT = 30.0
+_DOWNLOAD_CHUNK_SIZE = 64 * 1024
 
 
 def _validate_timeout(value: float, name: str) -> float:
@@ -96,9 +161,15 @@ class DashboardClientX:
 
     @property
     def polyscope_version(self) -> VersionInformation:
-        raise NotImplementedError(
-            "the legacy PolyScope-version query is not implemented for PolyScope X"
-        )
+        """The PolyScope marketing version, queried from ``/versions/v1``.
+
+        Unlike G5, which caches the version at connect, every read performs a
+        Robot API request. Robot API versions older than 5.0.107
+        (PolyScope 10.14.0) do not expose the version and raise
+        :class:`NotImplementedError`.
+        """
+
+        return self.get_polyscope_version()
 
     @property
     def connect_timeout(self) -> float:
@@ -237,18 +308,30 @@ class DashboardClientX:
         connecting: bool = False,
         json_data: dict[str, object] | None = None,
         files: dict[str, tuple[str, bytes, str]] | None = None,
+        empty_json_body: bool = False,
     ) -> httpx.Response:
         client = self._client
         if client is None or (not connecting and self._robot_api_version.is_empty):
             raise LifecycleError("dashboard client is not connected")
-        try:
+        # Upstream sends body-less PUT/POST commands as an empty
+        # application/json body; mirror it so the Robot API accepts them.
+        content = b"" if empty_json_body else None
+        headers = {"Content-Type": "application/json"} if empty_json_body else None
+        with self._translate_http_errors(method, endpoint):
             return client.request(
                 method,
                 f"{self.BASE_PATH}{endpoint}",
+                content=content,
                 json=json_data,
                 files=files,
+                headers=headers,
                 timeout=self._timeout(),
             )
+
+    @contextmanager
+    def _translate_http_errors(self, method: str, endpoint: str) -> Iterator[None]:
+        try:
+            yield
         except httpx.ConnectTimeout as exc:
             raise URCLTimeoutError(
                 f"Robot API {method} {endpoint} timed out while connecting",
@@ -291,14 +374,18 @@ class DashboardClientX:
         *,
         json_data: dict[str, object] | None = None,
         files: dict[str, tuple[str, bytes, str]] | None = None,
+        empty_json_body: bool = False,
     ) -> DashboardResponse:
         response = self._perform_request(
             method,
             endpoint,
             json_data=json_data,
             files=files,
+            empty_json_body=empty_json_body,
         )
-        if response.status_code != 200:
+        # Upstream treats every 2xx as success: shutdown answers 202 and an
+        # empty support-file download 204.
+        if not response.is_success:
             raise DashboardCommandError(
                 f"{method} {endpoint}",
                 response.text,
@@ -336,12 +423,33 @@ class DashboardClientX:
             raise ProtocolError(f"{source} has no string {field!r} field")
         return value
 
-    def _require_program_api(self, operation: str) -> None:
-        if self.robot_api_version < _PROGRAM_API_MINIMUM:
+    def _require_command(self, command: str) -> _RobotAPICommand:
+        """Return ``command``'s table entry or raise if the API is too old.
+
+        Mirrors upstream ``assertHasCommand`` except that a disconnected
+        client raises :class:`LifecycleError` instead of connecting.
+        """
+
+        spec = _COMMANDS[command]
+        actual = self.robot_api_version
+        if actual < spec.robot_api_version:
             raise NotImplementedError(
-                f"{operation} requires Robot API 3.1.4 (PolyScope 10.12.0) or newer; "
-                f"connected API is {self.robot_api_version}"
+                f"The command {command!r} requires Robot API version "
+                f"{spec.robot_api_version} or higher. The connected robot has "
+                f"Robot API version {actual}. Please upgrade the robot to "
+                f"PolyScope {spec.polyscope_version} or higher to use this command."
             )
+        return spec
+
+    @contextmanager
+    def _temporary_receive_timeout(self, timeout: float) -> Iterator[None]:
+        with self._timeout_lock:
+            configured = self._receive_timeout
+            self.receive_timeout = timeout
+            try:
+                yield
+            finally:
+                self.receive_timeout = configured
 
     def power_off(self) -> DashboardResponse:
         return self._request(
@@ -350,17 +458,12 @@ class DashboardClientX:
 
     def power_on(self, timeout: float = 300.0) -> DashboardResponse:
         temporary_timeout = _validate_timeout(timeout, "timeout")
-        with self._timeout_lock:
-            configured = self._receive_timeout
-            self.receive_timeout = temporary_timeout
-            try:
-                return self._request(
-                    "PUT",
-                    "/robotstate/v1/state",
-                    json_data={"action": "POWER_ON"},
-                )
-            finally:
-                self.receive_timeout = configured
+        with self._temporary_receive_timeout(temporary_timeout):
+            return self._request(
+                "PUT",
+                "/robotstate/v1/state",
+                json_data={"action": "POWER_ON"},
+            )
 
     def brake_release(self) -> DashboardResponse:
         return self._request(
@@ -370,7 +473,7 @@ class DashboardClientX:
         )
 
     def load_program(self, program_file_name: str) -> DashboardResponse:
-        if self.robot_api_version < _PROGRAM_API_MINIMUM:
+        if self.robot_api_version < _ROBOT_API_3_1_4:
             return self._request(
                 "PUT",
                 "/program/v1/load",
@@ -406,10 +509,12 @@ class DashboardClientX:
         )
 
     def close_popup(self) -> DashboardResponse:
-        raise NotImplementedError("closing popups is not implemented for PolyScope X")
+        spec = self._require_command("close_popup")
+        return self._request("DELETE", spec.endpoint)
 
     def close_safety_popup(self) -> DashboardResponse:
-        raise NotImplementedError("closing safety popups is not implemented for PolyScope X")
+        spec = self._require_command("close_safety_popup")
+        return self._request("DELETE", spec.endpoint)
 
     def restart_safety(self) -> DashboardResponse:
         return self._request(
@@ -426,7 +531,8 @@ class DashboardClientX:
         )
 
     def shutdown(self) -> DashboardResponse:
-        raise NotImplementedError("shutdown is not implemented for PolyScope X")
+        spec = self._require_command("shutdown")
+        return self._request("PUT", spec.endpoint, empty_json_body=True)
 
     def quit(self) -> DashboardResponse:
         self._require_client()
@@ -439,40 +545,56 @@ class DashboardClientX:
         raise NotImplementedError("program save status is not implemented for PolyScope X")
 
     def is_in_remote_control(self) -> bool:
-        self._require_program_api("remote-control query")
-        _response, payload = self._json_request("GET", "/system/v1/controlmode")
+        spec = self._require_command("is_in_remote_control")
+        _response, payload = self._json_request("GET", spec.endpoint)
         return self._string_field(payload, "mode", "control-mode response") == "REMOTE"
 
-    def popup(self, popup_text: str) -> DashboardResponse:
-        raise NotImplementedError("popups are not implemented for PolyScope X")
+    def popup(self, popup_text: str, popup_title: str = "") -> DashboardResponse:
+        spec = self._require_command("popup")
+        return self._request(
+            "POST",
+            spec.endpoint,
+            json_data={"title": popup_title, "message": popup_text},
+        )
 
     def add_to_log(self, log_text: str) -> DashboardResponse:
-        raise NotImplementedError("adding log messages is not implemented for PolyScope X")
+        spec = self._require_command("add_to_log")
+        return self._request("POST", spec.endpoint, json_data={"message": log_text})
 
     def get_polyscope_version(self) -> VersionInformation:
-        raise NotImplementedError(
-            "the legacy PolyScope-version query is not implemented for PolyScope X"
+        """Return the PolyScope marketing version reported by ``/versions/v1``."""
+
+        spec = self._require_command("PolyscopeVersion")
+        _response, payload = self._json_request("GET", spec.endpoint)
+        return VersionInformation.from_string(
+            self._string_field(payload, "marketingVersion", "versions response")
         )
 
     def get_robot_model(self) -> str:
-        raise NotImplementedError("robot-model query is not implemented for PolyScope X")
+        spec = self._require_command("get_robot_model")
+        _response, payload = self._json_request("GET", spec.endpoint)
+        return self._string_field(payload, "robotType", "system-information response")
 
     def get_serial_number(self) -> str:
-        raise NotImplementedError("serial-number query is not implemented for PolyScope X")
+        spec = self._require_command("get_serial_number")
+        _response, payload = self._json_request("GET", spec.endpoint)
+        return self._string_field(
+            payload, "serialNumber", "system-information response"
+        )
 
     def robot_mode(self) -> str:
-        self._require_program_api("robot-mode query")
-        _response, payload = self._json_request("GET", "/robotstate/v1/robotmode")
+        spec = self._require_command("robot_mode")
+        _response, payload = self._json_request("GET", spec.endpoint)
         return self._string_field(payload, "mode", "robot-mode response")
 
     def get_loaded_program(self) -> str:
-        self._require_program_api("loaded-program query")
-        _response, payload = self._json_request("GET", "/program/v1/loaded")
+        spec = self._require_command("get_loaded_program")
+        _response, payload = self._json_request("GET", spec.endpoint)
         return self._string_field(payload, "name", "loaded-program response")
 
     def safety_mode(self) -> str:
-        self._require_program_api("safety-mode query")
-        _response, payload = self._json_request("GET", "/robotstate/v1/safetymode")
+        spec = self._require_command("safety_mode")
+        _response, payload = self._json_request("GET", spec.endpoint)
         return self._string_field(payload, "mode", "safety-mode response")
 
     def safety_status(self) -> str:
@@ -484,8 +606,8 @@ class DashboardClientX:
         return ProgramState(state)
 
     def get_operational_mode(self) -> str:
-        self._require_program_api("operational-mode query")
-        _response, payload = self._json_request("GET", "/system/v1/operationalmode")
+        spec = self._require_command("get_operational_mode")
+        _response, payload = self._json_request("GET", spec.endpoint)
         return self._string_field(payload, "mode", "operational-mode response")
 
     def set_operational_mode(self, operational_mode: str) -> DashboardResponse:
@@ -500,8 +622,87 @@ class DashboardClientX:
     def get_user_role(self) -> str:
         raise NotImplementedError("user roles are not implemented for PolyScope X")
 
-    def generate_flight_report(self, report_type: str) -> DashboardResponse:
-        raise NotImplementedError("flight reports are not implemented for PolyScope X")
+    def generate_flight_report(self, report_type: str = "") -> DashboardResponse:
+        """Ask the robot to generate a flight report.
+
+        The Robot API has no report types; a non-empty ``report_type`` is
+        logged and ignored. The read timeout is raised to 30 s for this
+        request and restored afterwards, also on failure.
+        """
+
+        spec = self._require_command("generate_flight_report")
+        if report_type:
+            _LOGGER.warning(
+                "The report_type parameter is not used in the PolyScope X Robot API. "
+                "Ignoring it."
+            )
+        with self._temporary_receive_timeout(_FLIGHT_REPORT_TIMEOUT):
+            return self._request("POST", spec.endpoint, empty_json_body=True)
+
+    def download_support_files(self, save_path: str | Path) -> DashboardResponse:
+        """Stream the robot's support-file zip archive to ``save_path``.
+
+        The archive is written to a temporary file next to ``save_path`` and
+        moved into place only after the whole body arrived, replacing an
+        existing file. A 204 response (no reports yet) produces an empty file.
+        HTTP rejections raise :class:`DashboardCommandError`, transport
+        failures the usual connection/timeout errors, and local filesystem
+        failures :class:`OSError`. The temporary file never survives a
+        failure.
+        """
+
+        spec = self._require_command("download_support_files")
+        if not str(save_path):
+            raise ValueError("save_path must not be empty")
+        destination = Path(save_path)
+        client = self._require_client()
+        try:
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f"{destination.name}.", dir=destination.parent
+            )
+        except OSError as exc:
+            raise OSError(
+                f"failed to create a temporary file for saving {destination}"
+            ) from exc
+        temporary = Path(temporary_name)
+        try:
+            with (
+                os.fdopen(descriptor, "wb") as stream,
+                self._translate_http_errors("GET", spec.endpoint),
+                client.stream(
+                    "GET",
+                    f"{self.BASE_PATH}{spec.endpoint}",
+                    timeout=self._timeout(),
+                ) as response,
+            ):
+                if not response.is_success:
+                    response.read()
+                    raise DashboardCommandError(
+                        f"GET {spec.endpoint}",
+                        response.text,
+                        status=response.status_code,
+                    )
+                for chunk in response.iter_bytes(_DOWNLOAD_CHUNK_SIZE):
+                    stream.write(chunk)
+                status = response.status_code
+            try:
+                os.replace(temporary, destination)
+            except OSError as exc:
+                raise OSError(
+                    f"failed to move downloaded support files to {destination}"
+                ) from exc
+        except BaseException:
+            with suppress(OSError):
+                temporary.unlink()
+            raise
+        return _download_result(
+            destination,
+            DashboardResponse(
+                message=f"Downloaded support files to {destination}",
+                data={"status_code": status},
+                status_code=status,
+            ),
+        )
 
     def generate_support_file(self, directory_path: str) -> DashboardResponse:
         raise NotImplementedError("support files are not implemented for PolyScope X")
@@ -534,8 +735,8 @@ class DashboardClientX:
         return value
 
     def get_program_list(self) -> tuple[ProgramInformation, ...]:
-        self._require_program_api("program listing")
-        _response, payload = self._json_request("GET", "/programs/v1/")
+        spec = self._require_command("get_program_list")
+        _response, payload = self._json_request("GET", spec.endpoint)
         raw_programs = payload.get("programs")
         if not isinstance(raw_programs, list):
             raise ProtocolError("program-list response has no array 'programs' field")
@@ -564,7 +765,9 @@ class DashboardClientX:
         return tuple(result)
 
     def _program_upload(self, file_path: str | Path, method: str) -> DashboardResponse:
-        self._require_program_api("program upload")
+        spec = self._require_command(
+            "upload_program" if method == "POST" else "update_program"
+        )
         path = Path(file_path)
         try:
             content = path.read_bytes()
@@ -574,7 +777,7 @@ class DashboardClientX:
             raise OSError(f"failed to read program file {path}") from exc
         response = self._request(
             method,
-            "/programs/v1/",
+            spec.endpoint,
             files={"file": (path.name, content, "text/plain")},
         )
         program_name = response.data.get("programName")
@@ -598,13 +801,13 @@ class DashboardClientX:
     def download_program(
         self, program_name: str, save_path: str | Path
     ) -> DashboardResponse:
-        self._require_program_api("program download")
+        spec = self._require_command("download_program")
         if not program_name:
             raise ValueError("program_name must not be empty")
         if not str(save_path):
             raise ValueError("save_path must not be empty")
         path = Path(save_path)
-        response = self._request("GET", f"/programs/v1/{program_name}")
+        response = self._request("GET", f"{spec.endpoint}{program_name}")
         try:
             path.write_text(response.message, encoding="utf-8")
         except OSError as exc:
@@ -681,6 +884,7 @@ class DashboardClientX:
     command_get_user_role = get_user_role
     command_generate_flight_report = generate_flight_report
     command_generate_support_file = generate_support_file
+    command_download_support_files = download_support_files
     command_save_log = save_log
     command_get_program_list = get_program_list
     command_upload_program = upload_program
