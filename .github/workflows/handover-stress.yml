@@ -1,10 +1,11 @@
 name: Program handover stress (temporary)
 
 # Temporary diagnostics for the intermittent "robot connects, then drops"
-# failures. In the examples workflow they only hit the first two examples
-# after a fresh PolyScope X boot, so each iteration boots URSim again, waits
-# for readiness exactly like the examples job, and runs those two examples.
-# Failures do not stop the loop, so one job yields a failure rate.
+# failures. In the examples workflow they only hit the first two examples,
+# within ~15 s of PolyScope X becoming ready. Boot once (re-booting PolyScope X
+# on the same runner is unreliable), then run force_mode followed by many short
+# full_driver runs, so the window right after readiness is sampled repeatedly.
+# Failures do not stop the loop.
 
 on:
   workflow_dispatch:
@@ -15,7 +16,7 @@ permissions:
 
 jobs:
   stress:
-    timeout-minutes: 50
+    timeout-minutes: 40
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -33,46 +34,44 @@ jobs:
           python-version: "3.10"
           cache: pip
       - run: python -m pip install -e .
-      - name: Boot URSim and run the first two examples, repeatedly
-        env:
-          URCL_LOG_LEVEL: DEBUG
-          ITERATIONS: "8"
+      - name: Start URSim
         run: |
           chmod +x scripts/start_ursim.sh
+          scripts/start_ursim.sh -m "${{ matrix.model }}" -v "${{ matrix.version }}"
+      - name: Wait for PolyScope X to become controllable
+        run: python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101
+      - name: force_mode, then full_driver repeatedly
+        env:
+          URCL_LOG_LEVEL: DEBUG
+          ITERATIONS: "15"
+        run: |
           mkdir -p out
+          python scripts/primary_monitor.py --robot-ip 192.168.56.101 > out/primary-monitor.log 2>&1 &
+          monitor=$!
           failures=0
-          done_iterations=0
+          python run_examples.py --simulator --robot-ip 192.168.56.101 \
+            --only examples.force_mode_example > out/iter-0.log 2>&1 || { failures=$((failures + 1)); echo "force_mode FAILED"; cat out/iter-0.log; }
           for i in $(seq 1 "$ITERATIONS"); do
-            echo "==== iteration $i $(date +%H:%M:%S)"
-            if ! scripts/start_ursim.sh -r -m "${{ matrix.model }}" -v "${{ matrix.version }}" > "out/start-$i.log" 2>&1; then
-              echo "start failed"; cat "out/start-$i.log"; continue
-            fi
-            if ! python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101 > "out/ready-$i.log" 2>&1; then
-              echo "readiness failed"; cat "out/ready-$i.log"; continue
-            fi
-            python scripts/primary_monitor.py --robot-ip 192.168.56.101 > "out/monitor-$i.log" 2>&1 &
-            monitor=$!
-            if python run_examples.py --simulator --robot-ip 192.168.56.101 \
-                --only examples.force_mode_example --only examples.full_driver \
-                > "out/iter-$i.log" 2>&1; then
-              result=passed
-            else
-              result=FAILED
+            echo "==== iteration $i $(date +%H:%M:%S.%N | cut -c1-12)"
+            if ! python run_examples.py --simulator --robot-ip 192.168.56.101 \
+                --only examples.full_driver --duration 3 > "out/iter-$i.log" 2>&1; then
               failures=$((failures + 1))
+              echo "---- iteration $i FAILED"
+              cat "out/iter-$i.log"
             fi
-            done_iterations=$((done_iterations + 1))
-            sleep 5
-            kill "$monitor" || true
-            wait "$monitor" || true
-            echo "---- iteration $i $result"
-            if [ "$result" = FAILED ]; then
-              cat "out/ready-$i.log" "out/iter-$i.log" "out/monitor-$i.log"
-              docker logs ursim > "out/ursim-$i.log" 2>&1 || true
-            fi
+            grep -h "command gap" "out/iter-$i.log" || true
           done
-          docker rm -f ursim >/dev/null 2>&1 || true
-          echo "STRESS SUMMARY ${{ matrix.version }} shard ${{ matrix.shard }}: $failures failed of $done_iterations"
-          echo "$failures $done_iterations" > out/failures.txt
+          sleep 3
+          kill "$monitor" || true
+          wait "$monitor" || true
+          echo "STRESS SUMMARY ${{ matrix.version }}: $failures failed of $((ITERATIONS + 1))"
+          grep -h "timed out\|STOPPED\|runtime-exception\|error " out/primary-monitor.log || true
+          echo "$failures $((ITERATIONS + 1))" > out/failures.txt
+      - name: Capture URSim log
+        if: always()
+        run: |
+          sleep 5
+          docker logs ursim > "out/ursim-${{ matrix.version }}.log" 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

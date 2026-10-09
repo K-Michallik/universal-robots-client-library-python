@@ -59,9 +59,9 @@ def run(args: argparse.Namespace) -> None:
         try:
             _LOGGER.info("Robot version: %s", driver.version)
             increment_constant = 0.002 if driver.version.major < 5 else 0.0005
-            receive_timeout = RobotReceiveTimeout.from_milliseconds(
-                args.receive_timeout_ms or 100
-            )
+            receive_timeout_ms = args.receive_timeout_ms or 100
+            receive_timeout = RobotReceiveTimeout.from_milliseconds(receive_timeout_ms)
+            last_write: float | None = None
             joint_target: list[float] | None = None
             passed_positive_part = False
             passed_negative_part = False
@@ -101,6 +101,15 @@ def run(args: argparse.Namespace) -> None:
                     ControlMode.SERVOJ,
                     receive_timeout,
                 )
+                now = time.monotonic()
+                if last_write is not None and (now - last_write) * 1000 > receive_timeout_ms / 2:
+                    # The control script halts once a gap exceeds its receive timeout.
+                    _LOGGER.warning(
+                        "Servo command gap of %.0f ms (robot receive timeout %d ms)",
+                        (now - last_write) * 1000,
+                        receive_timeout_ms,
+                    )
+                last_write = now
                 _LOGGER.debug("RTDE package: %r", package)
 
             _LOGGER.info("Movement done")
