@@ -87,6 +87,25 @@ class URStream:
             cancel_event=cancel_event,
         )
 
+    def reconnect(
+        self,
+        *,
+        max_attempts: int = 0,
+        retry_interval: float = TCPSocket.DEFAULT_RECONNECTION_TIME,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        """Re-establish a lost connection without overriding a deliberate :meth:`close`."""
+        self._transport.reconnect(
+            max_attempts=max_attempts,
+            retry_interval=retry_interval,
+            cancel_event=cancel_event,
+        )
+
+    @property
+    def stop_requested(self) -> bool:
+        """Whether :meth:`close` was called since the last :meth:`connect`."""
+        return self._transport.stop_requested
+
     def read(self) -> bytes:
         """Read exactly one complete frame, including its length prefix."""
         with self._read_lock:

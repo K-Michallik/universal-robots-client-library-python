@@ -104,18 +104,79 @@ class TCPSocket:
         """Connect, retrying until success.
 
         ``max_attempts=0`` means unlimited attempts.  Calling :meth:`close`, or
-        setting ``cancel_event``, interrupts the retry wait.
+        setting ``cancel_event``, interrupts the retry wait.  An explicit
+        ``connect()`` clears a previous :meth:`close`.
         """
+        retry_interval = self._validate_connect_arguments(max_attempts, retry_interval)
+        if self.is_connected:
+            return
+        self._cancel.clear()
+        self._connect_attempts(max_attempts, retry_interval, cancel_event)
+
+    def reconnect(
+        self,
+        *,
+        max_attempts: int = 0,
+        retry_interval: float = DEFAULT_RECONNECTION_TIME,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        """Re-establish a connection that was lost, honouring a deliberate close.
+
+        Unlike :meth:`connect`, this only proceeds from the lost-connection
+        (``DISCONNECTED``) state and never clears a :meth:`close` request, so an
+        automatic reconnect cannot resurrect a socket that was closed while it
+        was backing off.  Raises :class:`URCLConnectionError` when the socket was
+        closed, was never connected, or the attempts fail.
+        """
+        retry_interval = self._validate_connect_arguments(max_attempts, retry_interval)
+        if self._is_connected_or_check_lost():
+            return
+        try:
+            self._connect_attempts(max_attempts, retry_interval, cancel_event)
+        except URCLConnectionError:
+            with self._state_lock:
+                # A failed attempt leaves the socket INVALID; keep it eligible for
+                # the next automatic reconnect unless it was closed meanwhile.
+                if self._state is SocketState.INVALID and not self._cancel.is_set():
+                    self._state = SocketState.DISCONNECTED
+            raise
+
+    def _is_connected_or_check_lost(self) -> bool:
+        """Return ``True`` when already connected; raise unless the connection was lost."""
+        with self._state_lock:
+            if self._state is SocketState.CONNECTED:
+                return True
+            if self._cancel.is_set() or self._state is SocketState.CLOSED:
+                raise URCLConnectionError(
+                    f"Connection to {self._host}:{self._port} was closed; not reconnecting"
+                )
+            if self._state is not SocketState.DISCONNECTED:
+                raise URCLConnectionError(
+                    f"Connection to {self._host}:{self._port} was not lost; "
+                    "use connect() to establish it"
+                )
+            return False
+
+    @property
+    def stop_requested(self) -> bool:
+        """Whether :meth:`close` was called since the last :meth:`connect`."""
+        return self._cancel.is_set()
+
+    def _validate_connect_arguments(self, max_attempts: int, retry_interval: float) -> float:
         if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
             raise TypeError("max_attempts must be an integer")
         if max_attempts < 0:
             raise ValueError("max_attempts cannot be negative")
         validated_retry_interval = self._validate_timeout(retry_interval, "retry_interval")
         assert validated_retry_interval is not None
-        retry_interval = validated_retry_interval
-        if self.is_connected:
-            return
-        self._cancel.clear()
+        return validated_retry_interval
+
+    def _connect_attempts(
+        self,
+        max_attempts: int,
+        retry_interval: float,
+        cancel_event: threading.Event | None,
+    ) -> None:
         attempts = 0
         last_error: OSError | None = None
         while max_attempts == 0 or attempts < max_attempts:

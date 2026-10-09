@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from typing import Generic, Protocol, TypeVar
 
@@ -60,7 +61,7 @@ class URProducer(Generic[T]):
             except URCLTimeoutError:
                 continue
             except URCLConnectionError:
-                if not self._running.is_set() or self._stream.closed:
+                if self._should_give_up():
                     return None
                 if self._on_reconnect is not None:
                     LOGGER.warning("RTDE stream was lost; requesting a full reconnect")
@@ -68,10 +69,12 @@ class URProducer(Generic[T]):
                     self._running.clear()
                     return None
                 LOGGER.warning("Stream was lost; reconnecting in %.1f seconds", backoff)
-                if self._stop.wait(backoff):
+                if self._wait_backoff(backoff):
                     return None
                 try:
-                    self._stream.connect(
+                    # reconnect() (not connect()) so a close() issued during the
+                    # back-off is honoured instead of being silently undone.
+                    self._stream.reconnect(
                         max_attempts=1,
                         retry_interval=backoff,
                         cancel_event=self._stop,
@@ -80,3 +83,22 @@ class URProducer(Generic[T]):
                 except URCLConnectionError:
                     backoff = min(backoff * 2.0, 120.0)
         return None
+
+    def _should_give_up(self) -> bool:
+        return (
+            not self._running.is_set()
+            or self._stream.closed
+            or self._stream.stop_requested
+        )
+
+    def _wait_backoff(self, seconds: float) -> bool:
+        """Sleep in short slices; return ``True`` when the producer should stop."""
+        deadline = time.monotonic() + seconds
+        while True:
+            if self._should_give_up():
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            if self._stop.wait(min(remaining, 0.1)):
+                return True
