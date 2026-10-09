@@ -11,8 +11,11 @@ program. Driving the same REST call directly makes the step deterministic.
 The Robot API program endpoints (/program/v1/loaded and friends) are served
 through the web frontend, though, and hang until the client times out when no
 UI session is open. Jobs that load programs therefore open the UI again, but
-only after this script has confirmed safety, and pass --program-api to wait
-until those endpoints answer.
+only after this script has confirmed safety, and pass --frontend-loaded to
+wait until the UI has finished starting. The endpoints answer (412, "No
+program loaded") well before that, but the starting UI still loads its last
+program and can power the robot off, which aborts an external-control program
+started in that window.
 """
 
 from __future__ import annotations
@@ -56,19 +59,12 @@ def _robot_controllable(base: str) -> bool:
     return robot.get("safetyMode") == "NORMAL"
 
 
-def _program_api_answering(base: str) -> bool:
-    # The Robot API program endpoints are served through the web frontend:
-    # with no PolyScope X UI session they hang until the client times out.
-    # Any HTTP answer, including 412 "No program loaded", means a frontend is
-    # connected.
-    request = urllib.request.Request(f"{base}{ROBOT_API}/program/v1/loaded")
-    try:
-        with urllib.request.urlopen(request, timeout=5.0):
-            return True
-    except urllib.error.HTTPError:
-        return True
-    except (urllib.error.URLError, OSError):
-        return False
+def _loaded_program(base: str) -> str | None:
+    # The starting frontend ends by loading its last program, so a 200 with a
+    # name marks it as done; 412 (no program yet) and timeouts mean not yet.
+    payload = _request(f"{base}{ROBOT_API}/program/v1/loaded")
+    name = (payload or {}).get("name")
+    return name if isinstance(name, str) and name else None
 
 
 def _await(label: str, predicate, deadline: float) -> None:
@@ -85,11 +81,11 @@ def main() -> int:
     parser.add_argument("--robot-ip", required=True)
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument(
-        "--program-api",
+        "--frontend-loaded",
         action="store_true",
         help=(
-            "also wait until the Robot API program endpoints answer, which "
-            "requires a PolyScope X web frontend session to be open"
+            "also wait until an open PolyScope X web frontend has finished "
+            "starting, which it signals by loading a program"
         ),
     )
     args = parser.parse_args()
@@ -106,12 +102,14 @@ def main() -> int:
         else:
             print("[ursim-ready] safety configuration already confirmed", flush=True)
         _await("robot controllable", lambda: _robot_controllable(base), deadline)
-        if args.program_api:
+        if args.frontend_loaded:
             _await(
-                "Robot API program endpoints answering",
-                lambda: _program_api_answering(base),
+                "web frontend loaded a program",
+                lambda: _loaded_program(base) is not None,
                 deadline,
             )
+            print(f"[ursim-ready] loaded program: {_loaded_program(base)}", flush=True)
+            _await("robot controllable", lambda: _robot_controllable(base), deadline)
     except TimeoutError as exc:
         print(f"[ursim-ready] TIMEOUT waiting for {exc.args[0]}", file=sys.stderr, flush=True)
         return 1

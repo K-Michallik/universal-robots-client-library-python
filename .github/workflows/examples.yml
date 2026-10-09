@@ -137,16 +137,17 @@ jobs:
       # the client times out. Only the remote-control entries load programs
       # (dashboard_example), so only they open the UI; upstream URCL CI keeps
       # a headless browser on PolyScope X too. It opens after the readiness
-      # gate has confirmed
-      # safety, so the frontend has no confirmation left to power-cycle the
-      # robot with, and the gate then waits for the program endpoints.
+      # gate has confirmed safety, so the UI has no confirmation left to
+      # power-cycle the robot with. While starting, the UI still loads its
+      # last program and can power the robot off, so wait until it has
+      # loaded one before running examples that start external control.
       - name: Open PolyScope X web frontend
         if: matrix.remote-control
         run: |
           google-chrome --no-sandbox --headless=new \
             --user-data-dir="${RUNNER_TEMP}/polyscopex-chrome" \
             http://192.168.56.101 > "${RUNNER_TEMP}/polyscopex-chrome.log" 2>&1 &
-          python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101 --program-api
+          python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101 --frontend-loaded
       - name: Run bounded examples
         run: >
           python run_examples.py

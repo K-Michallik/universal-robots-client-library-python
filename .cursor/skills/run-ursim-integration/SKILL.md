@@ -43,7 +43,8 @@ confirmation.
    mounted), also open the web frontend afterwards, since the Robot API
    program endpoints only answer while a UI session is open: follow the
    current CI browser command when Chrome is available, or ask the user to
-   open `http://192.168.56.101`. Then rerun the script with `--program-api`.
+   open `http://192.168.56.101`. Then rerun the script with `--frontend-loaded`
+   so examples start only after the UI has finished starting.
 6. Run the bounded examples:
 
    ```bash
