@@ -123,9 +123,11 @@ terminal pose from invalidating the next example.
 
 `scripts/start_ursim.sh` launches representative Docker controllers. The
 repository's `.github/workflows/examples.yml` workflow runs offline checks and
-a separate PolyScope 5/e-Series and PolyScope X integration matrix. CI gives
-the browser-backed PolyScope X services additional time to settle before
-starting examples. PolyScope X entries remain visible but non-blocking because
+a separate PolyScope 5/e-Series and PolyScope X integration matrix. Before
+starting examples on PolyScope X, CI waits until the robot is controllable,
+until the web frontend has finished starting in remote-control entries, and
+then until the RTDE stream has been free of realtime stalls for 10 s.
+PolyScope X entries remain visible but non-blocking because
 their timing is sensitive to shared-runner load; reproduce failures locally
 before treating them as library regressions. CB3 is not part of that matrix.
 Local and CI matrix runs can produce expected skips for controller-version,

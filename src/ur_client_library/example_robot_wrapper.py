@@ -6,6 +6,7 @@ intended as a stable production abstraction.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -29,6 +30,7 @@ from ur_client_library.ur.ur_driver import UrDriver, UrDriverConfiguration
 from ur_client_library.ur.version_information import VersionInformation
 
 ComponentT = TypeVar("ComponentT")
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +202,7 @@ class ExampleRobotWrapper:
         self.clear_protective_stop()
         primary.command_stop()
         primary.command_brake_release()
+        _LOGGER.info("Robot ready to start a program")
         self._robot_initialized = True
 
     def initialize_robot_with_dashboard(self) -> None:
@@ -239,6 +242,10 @@ class ExampleRobotWrapper:
         self._rtde_started = True
 
     def _handle_program_state(self, running: bool) -> None:
+        if running:
+            _LOGGER.info("Robot control program is running and connected to the driver")
+        else:
+            _LOGGER.info("Robot should be connected - Control program not running yet")
         with self._condition:
             self._program_running = bool(running)
             self._condition.notify_all()

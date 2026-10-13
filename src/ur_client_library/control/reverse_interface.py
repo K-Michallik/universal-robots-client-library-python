@@ -251,6 +251,7 @@ class ReverseInterface:
                 _LOGGER.error("Ignoring a second reverse-interface client")
                 return
             self._client = client
+        _LOGGER.info("Robot connected to reverse interface. Ready to receive control commands.")
         self._notify_program_state(True)
 
     def _disconnection_callback(self, client: ClientToken) -> None:
@@ -259,6 +260,7 @@ class ReverseInterface:
                 return
             self._client = None
             callbacks = tuple(self._disconnection_callbacks.values())
+        _LOGGER.info("Connection to reverse interface dropped.")
         self._notify_program_state(False)
         self._invoke_callbacks(callbacks, client)
 

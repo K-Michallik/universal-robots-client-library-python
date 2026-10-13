@@ -313,6 +313,7 @@ class ScriptCommandInterface(ReverseInterface):
                 return
             self._client = client
             self._receive_buffers[client] = bytearray()
+        _LOGGER.debug("Robot connected to ScriptCommandInterface.")
 
     def _disconnection_callback(self, client: ClientToken) -> None:
         with self._lock:
@@ -321,6 +322,7 @@ class ScriptCommandInterface(ReverseInterface):
             self._client = None
             self._receive_buffers.pop(client, None)
             callbacks = tuple(self._disconnection_callbacks.values())
+        _LOGGER.debug("Connection to ScriptCommandInterface dropped.")
         self._invoke_callbacks(callbacks, client)
 
     def _message_callback(self, client: ClientToken, data: bytes) -> None:

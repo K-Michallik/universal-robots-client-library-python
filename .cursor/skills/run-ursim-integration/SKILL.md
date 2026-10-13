@@ -39,12 +39,15 @@ confirmation.
    the user explicitly intends to replace an existing `ursim` container.
 
 5. For PolyScope X (`10.*`), run `scripts/wait_for_ursim_ready.py` before
-   running examples, as CI does. In remote control (citadel database
-   mounted), also open the web frontend afterwards, since the Robot API
-   program endpoints only answer while a UI session is open: follow the
-   current CI browser command when Chrome is available, or ask the user to
-   open `http://192.168.56.101`. Then rerun the script with `--frontend-loaded`
-   so examples start only after the UI has finished starting.
+   running examples, as CI does. It ends by waiting for a steady RTDE stream,
+   since the post-boot URCap startup stalls the realtime path. In remote
+   control (citadel database mounted), pass `--no-steady-rtde` to that first
+   run and open the web frontend afterwards, since the Robot API program
+   endpoints only answer while a UI session is open: follow the current CI
+   browser command when Chrome is available, or ask the user to open
+   `http://192.168.56.101`. Then rerun the script with `--frontend-loaded`, so
+   examples start only after the UI has finished starting and the RTDE
+   stream has settled again.
 6. Run the bounded examples:
 
    ```bash

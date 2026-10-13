@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
@@ -591,4 +593,89 @@ def test_failed_connect_cleans_partial_components_and_allows_retry(
 
     driver.connect()
     assert driver.is_connected
+    driver.close()
+
+
+class LateScriptCommands(FakeScriptCommands):
+    """A script-command server whose accept thread registers the robot late."""
+
+    def __init__(self, events: list[str], delay: float | None) -> None:
+        super().__init__(events)
+        self.connected = threading.Event()
+        self._delay = delay
+
+    @property  # type: ignore[override]
+    def is_connected(self) -> bool:
+        return self.connected.is_set()
+
+    def accept_later(self) -> None:
+        if self._delay is not None:
+            threading.Timer(self._delay, self.connected.set).start()
+
+
+def _driver_with_late_script_commands(
+    tmp_path: Path, delay: float | None
+) -> tuple[UrDriver, Callable[[bool], None], LateScriptCommands, list[tuple[bool, bool]]]:
+    events: list[str] = []
+    components: dict[str, object] = {}
+    script = tmp_path / "script"
+    script.write_text("unused")
+    commands = LateScriptCommands(events, delay)
+    reverse_callback: list[Callable[[bool], None]] = []
+    seen: list[tuple[bool, bool]] = []
+
+    base = make_factories(events, {}, components)
+
+    def reverse(
+        port: int,
+        callback: Callable[[bool], None],
+        step: int,
+        version: VersionInformation,
+    ) -> ReverseInterfaceProtocol:
+        reverse_callback.append(callback)
+        return base.reverse(port, callback, step, version)
+
+    factories = dataclasses.replace(
+        base,
+        reverse=reverse,
+        script_command=lambda _port, _version: cast(ScriptCommandInterfaceProtocol, commands),
+    )
+    driver = UrDriver(
+        UrDriverConfiguration(
+            robot_ip="192.0.2.3",
+            script_file=script,
+            output_recipe=("timestamp",),
+            headless_mode=True,
+            handle_program_state=lambda running: seen.append((running, commands.is_connected)),
+        ),
+        factories=factories,
+    ).connect()
+    return driver, reverse_callback[0], commands, seen
+
+
+def test_program_running_waits_for_script_command_accept(tmp_path: Path) -> None:
+    driver, reverse_connected, commands, seen = _driver_with_late_script_commands(
+        tmp_path, delay=0.05
+    )
+    commands.accept_later()
+
+    reverse_connected(True)
+
+    # Whoever is woken by "program running" can use the script-command interface.
+    assert seen == [(True, True)]
+    driver.close()
+
+
+def test_program_running_is_still_reported_without_script_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(UrDriver, "COMPANION_INTERFACE_TIMEOUT", 0.05)
+    driver, reverse_connected, _commands, seen = _driver_with_late_script_commands(
+        tmp_path, delay=None
+    )
+
+    reverse_connected(True)
+    reverse_connected(False)
+
+    assert seen == [(True, False), (False, False)]
     driver.close()

@@ -135,9 +135,15 @@ jobs:
             launcher_args+=(-c "${CITADEL_DB_FOLDER}")
           fi
           scripts/start_ursim.sh "${launcher_args[@]}"
+      # The gate ends by waiting for a steady RTDE stream. Remote-control
+      # entries open the web frontend next, whose startup can stall the
+      # stream again and power the robot off, so they skip it here and run it
+      # after the frontend has loaded instead.
       - name: Wait for PolyScope X to become controllable
         if: startsWith(matrix.version, '10.')
-        run: python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101
+        run: >
+          python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101
+          ${{ matrix.remote-control && '--no-steady-rtde' || '' }}
       # Upstream gates its remote-control tests on
       # POLYSCOPE_X_TESTS_WITH_REMOTE_CONTROL. The Python examples need no
       # flag: dashboard_example queries the control mode at runtime and skips
@@ -163,7 +169,8 @@ jobs:
       # gate has confirmed safety, so the UI has no confirmation left to
       # power-cycle the robot with. While starting, the UI still loads its
       # last program and can power the robot off, so wait until it has
-      # loaded one before running examples that start external control.
+      # loaded one before running examples that start external control, and
+      # then for the steady RTDE stream the first gate skipped.
       - name: Open PolyScope X web frontend
         if: matrix.remote-control
         run: |
@@ -176,16 +183,24 @@ jobs:
       - name: Show disk usage before examples
         run: df -h / /var/lib/docker
       - name: Run bounded examples
-        run: >
-          python run_examples.py
-          --simulator
-          --robot-ip 192.168.56.101
+        env:
+          URCL_LOG_LEVEL: DEBUG
+        run: |
+          # The controller's own account of why a program ended arrives on the
+          # Primary interface; record it alongside the example output.
+          python scripts/primary_monitor.py --robot-ip 192.168.56.101 > primary-monitor.log 2>&1 &
+          python run_examples.py --simulator --robot-ip 192.168.56.101
       - name: Show disk usage after examples
         if: always()
         run: df -h / /var/lib/docker
+      - name: Print primary monitor
+        if: always()
+        run: cat primary-monitor.log || true
       - name: Capture URSim log
         if: always()
         run: |
+          # PolyScope X flushes its service logs a few seconds late.
+          sleep 5
           docker logs ursim > "ursim-${{ matrix.version }}-${{ matrix.model }}.log" 2>&1 || true
           # docker logs only carries the container banner. URControl.log holds
           # the controller-side URScript runtime errors that explain why a
@@ -200,6 +215,7 @@ jobs:
           path: |
             ursim-*.log
             urcontrol-*.log
+            primary-monitor.log
           if-no-files-found: warn
           retention-days: 10
       - name: Stop URSim
