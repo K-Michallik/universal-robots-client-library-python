@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from ur_client_library.example_robot_wrapper import (
     ExampleRobotWrapper,
     ExampleRobotWrapperFactories,
 )
-from ur_client_library.exceptions import URCLTimeoutError
+from ur_client_library.exceptions import DashboardCommandError, URCLTimeoutError
 from ur_client_library.ur.dashboard_client import DashboardClientPolicy
 from ur_client_library.ur.ur_driver import UrDriverConfiguration
 from ur_client_library.ur.version_information import VersionInformation
@@ -193,6 +195,43 @@ def test_protective_stop_retries_once_and_autostarts() -> None:
     assert events.index("primary-unlock") < events.index("driver-connect")
     assert events[-2:] == ["load:external_control.urp", "play"]
     assert wrapper.wait_for_program_running(0.0)
+
+
+class RejectingPopupDashboard(FakeDashboard):
+    def close_popup(self) -> None:
+        self.events.append("close-popup-rejected")
+        raise DashboardCommandError("DELETE /popup/v1", '{"closed":false}', status=400)
+
+    def close_safety_popup(self) -> None:
+        self.events.append("close-safety-popup-unsupported")
+        raise NotImplementedError("too old")
+
+
+def test_protective_stop_ignores_rejected_and_unsupported_popup_closing() -> None:
+    events: list[str] = []
+    captured: dict[str, object] = {}
+    factories = make_factories(
+        VersionInformation(10, 14), events, captured, protective_stopped=True
+    )
+
+    def dashboard(_ip: str, policy: DashboardClientPolicy | str) -> FakeDashboard:
+        return RejectingPopupDashboard(policy, events)
+
+    wrapper = ExampleRobotWrapper(
+        "192.0.2.13",
+        ("timestamp",),
+        factories=replace(factories, dashboard=dashboard),
+        sleep=lambda _seconds: None,
+    )
+
+    wrapper.connect()
+
+    assert events.index("close-popup-rejected") < events.index(
+        "close-safety-popup-unsupported"
+    )
+    assert events.index("close-safety-popup-unsupported") < events.index(
+        "primary-unlock"
+    )
 
 
 def test_rtde_start_and_resend_are_explicit_and_idempotent() -> None:

@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from ur_client_library.exceptions import LifecycleError, URCLTimeoutError
+from ur_client_library.exceptions import (
+    DashboardCommandError,
+    LifecycleError,
+    URCLTimeoutError,
+)
 from ur_client_library.helpers import wait_for
 from ur_client_library.primary.client import PrimaryClient
 from ur_client_library.ur.dashboard_client import (
@@ -218,7 +222,9 @@ class ExampleRobotWrapper:
                 self._dashboard.close_popup,
                 self._dashboard.close_safety_popup,
             ):
-                with suppress(NotImplementedError):
+                # Upstream ignores both an unsupported command and a rejected
+                # one; PolyScope X 10.14 rejects closing when no popup is open.
+                with suppress(NotImplementedError, DashboardCommandError):
                     close_popup()
         try:
             primary.command_unlock_protective_stop()
