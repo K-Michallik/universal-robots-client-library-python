@@ -38,6 +38,10 @@ Source baseline moves from URCL 2.14.0 (`91be9ee`) to 2.15.2.
 
 ### Changed
 
+- CI runs the Docker URSim matrix weekly and on demand
+  (`gh workflow run examples.yml --ref <branch>`) instead of on every push and
+  nightly; pushes and pull requests run the offline and package jobs, skip
+  documentation-only changes, and cancel superseded runs.
 - Spline velocities and accelerations are encoded with a 1e8 multiplier; the
   bundled `external_control.urscript` matches 2.15.2.
 - PolyScope X commands are gated per command on the Robot API version; any 2xx
