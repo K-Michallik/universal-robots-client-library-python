@@ -72,10 +72,25 @@ jobs:
           # dashboard backend and are not exercised.
           - model: ur5e
             version: 10.11.0
+          # Per-version program folders and citadel databases are the
+          # upstream URCL 2.15.2 fixtures. The citadel database persists
+          # remote-control mode, so 10.13.0+ boots ready for the
+          # state-changing dashboard path; whether every Python example
+          # behaves in remote control is not yet verified, so these stay
+          # advisory with the rest of the 10.x entries.
           - model: ur5e
             version: 10.12.0
+            program-folder: tests/resources/dockerursim/programs/polyscopex/10.12.0/ur5e
           - model: ur7e
             version: 10.13.0
+            program-folder: tests/resources/dockerursim/programs/polyscopex/10.13.0/ur7e
+            citadel-db: tests/resources/dockerursim/citadelDB/10.13.0
+            remote-control: true
+          - model: ur7e
+            version: 10.14.0
+            program-folder: tests/resources/dockerursim/programs/polyscopex/10.14.0/ur7e
+            citadel-db: tests/resources/dockerursim/citadelDB/10.14.0
+            remote-control: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -83,18 +98,86 @@ jobs:
           python-version: "3.10"
           cache: pip
       - run: python -m pip install -e .
+      # PolyScope X images load their bundled controller and URCap images into
+      # a nested Docker whose /var/lib/docker volume sits on the runner's root
+      # disk. 10.14 filled a stock runner's free space while installing its
+      # URCaps, so the UI never came up. Remove large preinstalled toolchains
+      # that no step here uses; setup-python's toolcache Python, Chrome and
+      # Docker live elsewhere and stay. Every entry runs it: the cost is a
+      # parallel delete, and a growing image cannot reintroduce the failure
+      # in an entry that skipped it.
+      - name: Free runner disk space
+        run: |
+          df -h / /var/lib/docker
+          docker system df
+          for dir in /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                     /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift; do
+            sudo rm -rf "${dir}" &
+          done
+          wait
+          df -h / /var/lib/docker
       - name: Start URSim
+        env:
+          PROGRAM_FOLDER: ${{ matrix.program-folder || '' }}
+          CITADEL_DB_FOLDER: ${{ matrix.citadel-db || '' }}
         run: |
           chmod +x scripts/start_ursim.sh
-          scripts/start_ursim.sh -m "${{ matrix.model }}" -v "${{ matrix.version }}"
+          launcher_args=(-m "${{ matrix.model }}" -v "${{ matrix.version }}")
+          if [ -n "${PROGRAM_FOLDER}" ]; then
+            launcher_args+=(-p "${PROGRAM_FOLDER}")
+          fi
+          if [ -n "${CITADEL_DB_FOLDER}" ]; then
+            launcher_args+=(-c "${CITADEL_DB_FOLDER}")
+          fi
+          scripts/start_ursim.sh "${launcher_args[@]}"
       - name: Wait for PolyScope X to become controllable
         if: startsWith(matrix.version, '10.')
         run: python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101
+      # Upstream gates its remote-control tests on
+      # POLYSCOPE_X_TESTS_WITH_REMOTE_CONTROL. The Python examples need no
+      # flag: dashboard_example queries the control mode at runtime and skips
+      # its state-changing path in local control. Check the mounted citadel
+      # database took effect, so a silent fallback to local control fails here
+      # instead of passing with fewer commands exercised.
+      - name: Confirm PolyScope X remote control
+        if: matrix.remote-control
+        run: |
+          python - <<'PY'
+          from ur_client_library import DashboardClient, DashboardClientPolicy
+
+          with DashboardClient("192.168.56.101", DashboardClientPolicy.POLYSCOPE_X) as dashboard:
+              if not dashboard.is_in_remote_control():
+                  raise SystemExit("PolyScope X booted in local control despite the citadel database")
+          print("PolyScope X is in remote control.")
+          PY
+      # The Robot API program endpoints are served through the PolyScope X
+      # web frontend: with no UI session, PUT /program/v1/loaded hangs until
+      # the client times out. Only the remote-control entries load programs
+      # (dashboard_example), so only they open the UI; upstream URCL CI keeps
+      # a headless browser on PolyScope X too. It opens after the readiness
+      # gate has confirmed safety, so the UI has no confirmation left to
+      # power-cycle the robot with. While starting, the UI still loads its
+      # last program and can power the robot off, so wait until it has
+      # loaded one before running examples that start external control.
+      - name: Open PolyScope X web frontend
+        if: matrix.remote-control
+        run: |
+          google-chrome --no-sandbox --headless=new \
+            --user-data-dir="${RUNNER_TEMP}/polyscopex-chrome" \
+            http://192.168.56.101 > "${RUNNER_TEMP}/polyscopex-chrome.log" 2>&1 &
+          python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101 --frontend-loaded
+      # Record the headroom left once URSim, and on PolyScope X its URCaps and
+      # web frontend, are up, and again after the examples.
+      - name: Show disk usage before examples
+        run: df -h / /var/lib/docker
       - name: Run bounded examples
         run: >
           python run_examples.py
           --simulator
           --robot-ip 192.168.56.101
+      - name: Show disk usage after examples
+        if: always()
+        run: df -h / /var/lib/docker
       - name: Capture URSim log
         if: always()
         run: |
