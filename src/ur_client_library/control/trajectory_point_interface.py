@@ -39,6 +39,10 @@ from .reverse_interface import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Spline velocities and accelerations need finer resolution than MULT_JOINTSTATE:
+# quantising near-zero values at 1e-6 produces jagged reconstructed profiles.
+MULT_VEL_ACC = 100_000_000
+
 
 class TrajectoryResult(IntEnum):
     UNKNOWN = -1
@@ -59,11 +63,22 @@ def trajectory_result_to_string(result: TrajectoryResult | int) -> str:
 TrajectoryResultCallback = Callable[[TrajectoryResult], None]
 
 
+def _validate_vel_acc_multiplier(multiplier: int) -> int:
+    if isinstance(multiplier, bool) or not isinstance(multiplier, int):
+        raise TypeError("vel_acc_multiplier must be an integer")
+    if not 0 < multiplier <= INT32_MAX:
+        raise InvalidRangeError(
+            "vel_acc_multiplier must be positive and fit a signed 32-bit integer"
+        )
+    return multiplier
+
+
 class TrajectoryPointInterface(ReverseInterface):
     """Serialize target-aware motion primitives as fixed 21-word packets."""
 
     MESSAGE_WORDS = 21
     MAX_GOAL_TIME = INT32_MAX / MULT_TIME
+    MULT_VEL_ACC = MULT_VEL_ACC
 
     def __init__(
         self,
@@ -80,6 +95,20 @@ class TrajectoryPointInterface(ReverseInterface):
         )
         self._trajectory_callbacks: dict[int, TrajectoryResultCallback] = {}
         self._receive_buffers: dict[ClientToken, bytearray] = {}
+        self._vel_acc_multiplier = MULT_VEL_ACC
+
+    @property
+    def vel_acc_multiplier(self) -> int:
+        """Multiplier used to encode spline point velocities and accelerations."""
+        return self._vel_acc_multiplier
+
+    def set_vel_acc_multiplier(self, multiplier: int) -> None:
+        """Match the spline vel/acc encoding to the running control script.
+
+        Scripts defining ``MULT_velacc`` decode with :data:`MULT_VEL_ACC`; legacy
+        scripts decode spline velocities and accelerations with ``MULT_jointstate``.
+        """
+        self._vel_acc_multiplier = _validate_vel_acc_multiplier(multiplier)
 
     def subscribe_trajectory_result(
         self, callback: TrajectoryResultCallback
@@ -88,13 +117,23 @@ class TrajectoryPointInterface(ReverseInterface):
         return self._unsubscribe(self._trajectory_callbacks, callback_id)
 
     def write_motion_primitive(self, primitive: MotionPrimitive) -> None:
-        packet = self.serialize_motion_primitive(primitive)
+        packet = self.serialize_motion_primitive(
+            primitive, vel_acc_multiplier=self._vel_acc_multiplier
+        )
         self._write_packet(packet)
 
     @classmethod
-    def serialize_motion_primitive(cls, primitive: MotionPrimitive) -> bytes:
+    def serialize_motion_primitive(
+        cls, primitive: MotionPrimitive, *, vel_acc_multiplier: int = MULT_VEL_ACC
+    ) -> bytes:
+        """Encode a primitive as one 21-word packet.
+
+        Only spline points encode their velocity and acceleration blocks with
+        ``vel_acc_multiplier``; every other block uses ``MULT_JOINTSTATE``.
+        """
         if not isinstance(primitive, MotionPrimitive):
             raise TypeError("primitive must be a MotionPrimitive")
+        vel_acc_multiplier = _validate_vel_acc_multiplier(vel_acc_multiplier)
         if not primitive.validate():
             raise InvalidRangeError("Motion primitive validation failed")
         if primitive.duration > cls.MAX_GOAL_TIME:
@@ -105,6 +144,7 @@ class TrajectoryPointInterface(ReverseInterface):
         first: tuple[float, ...] = (0.0,) * 6
         second: tuple[float, ...] = (0.0,) * 6
         third: tuple[float, ...] = (0.0,) * 6
+        second_third_multiplier = MULT_JOINTSTATE
 
         if isinstance(primitive, MoveCPrimitive):
             first = tuple(primitive.target)
@@ -121,6 +161,14 @@ class TrajectoryPointInterface(ReverseInterface):
             first = primitive.target_positions
             second = primitive.target_velocities
             third = primitive.target_accelerations or (0.0,) * 6
+            max_vel_acc = INT32_MAX / vel_acc_multiplier
+            largest_vel_acc = max(abs(value) for value in (*second, *third))
+            if largest_vel_acc > max_vel_acc:
+                raise InvalidRangeError(
+                    "Spline point velocity or acceleration out of range: got "
+                    f"{largest_vel_acc:g}, but the maximum allowed magnitude is {max_vel_acc:g}"
+                )
+            second_third_multiplier = vel_acc_multiplier
         elif isinstance(primitive, MotionPrimitiveWithTarget):
             first = tuple(primitive.target)
             q_near = primitive.target.q_near if isinstance(primitive.target, Pose) else None
@@ -146,11 +194,11 @@ class TrajectoryPointInterface(ReverseInterface):
             for index, value in enumerate(first)
         ]
         words.extend(
-            fixed(value, MULT_JOINTSTATE, name=f"second_block[{index}]")
+            fixed(value, second_third_multiplier, name=f"second_block[{index}]")
             for index, value in enumerate(second)
         )
         words.extend(
-            fixed(value, MULT_JOINTSTATE, name=f"third_block[{index}]")
+            fixed(value, second_third_multiplier, name=f"third_block[{index}]")
             for index, value in enumerate(third)
         )
         words.append(fixed(primitive.duration, MULT_TIME, name="duration"))

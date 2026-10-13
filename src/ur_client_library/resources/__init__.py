@@ -16,6 +16,7 @@ from ur_client_library.control.reverse_interface import (
     MULT_TIME,
 )
 from ur_client_library.control.script_reader import ScriptData
+from ur_client_library.control.trajectory_point_interface import MULT_VEL_ACC
 from ur_client_library.ur.tool_communication import ToolCommSetup
 from ur_client_library.ur.version_information import VersionInformation
 
@@ -70,6 +71,7 @@ def external_control_script_data(
         "BEGIN_REPLACE": begin_replace,
         "JOINT_STATE_REPLACE": str(MULT_JOINTSTATE),
         "TIME_REPLACE": str(MULT_TIME),
+        "VEL_ACC_REPLACE": str(MULT_VEL_ACC),
         "SERVO_J_REPLACE": (
             f"lookahead_time={lookahead_time:g}, gain={servoj_gain}"
         ),

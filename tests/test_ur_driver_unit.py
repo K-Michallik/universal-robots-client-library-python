@@ -10,12 +10,14 @@ from ur_client_library.comm.control_mode import ControlMode
 from ur_client_library.control._server import ClientToken
 from ur_client_library.control.motion_primitives import MotionPrimitive
 from ur_client_library.control.reverse_interface import (
+    MULT_JOINTSTATE,
     FreedriveControlMessage,
     TrajectoryControlMessage,
 )
 from ur_client_library.control.script_command_interface import ToolContactResult
 from ur_client_library.control.script_reader import ScriptData, ScriptReader
-from ur_client_library.control.trajectory_point_interface import TrajectoryResult
+from ur_client_library.control.trajectory_point_interface import MULT_VEL_ACC, TrajectoryResult
+from ur_client_library.exceptions import LifecycleError
 from ur_client_library.primary.packages import ConfigurationData, ErrorCode
 from ur_client_library.rtde import DataPackage, RTDEWriter
 from ur_client_library.rtde.rtde_writer import WritableStream
@@ -181,6 +183,7 @@ class FakeTrajectory:
 
     def __init__(self, events: list[str]) -> None:
         self.events = events
+        self._vel_acc_multiplier = 0
         self.callbacks: list[Callable[[TrajectoryResult], None]] = []
 
     def start(self) -> None:
@@ -228,6 +231,13 @@ class FakeTrajectory:
         del primitive
         return
 
+    @property
+    def vel_acc_multiplier(self) -> int:
+        return self._vel_acc_multiplier
+
+    def set_vel_acc_multiplier(self, multiplier: int) -> None:
+        self._vel_acc_multiplier = multiplier
+
     def close(self) -> None:
         self.events.append("trajectory-close")
 
@@ -259,6 +269,9 @@ class FakeReader:
         assert data is not None
         self.captured.update(data)
         return 'textmsg("ready")\n'
+
+    def is_variable_registered(self, key: str) -> bool:
+        return key in self.captured
 
 
 class FakeSender:
@@ -464,8 +477,47 @@ def test_packaged_external_control_script_is_loaded_with_importlib_resources() -
     assert "def externalControl():" in primary.scripts[0]
     assert "# HEADER_BEGIN" in primary.scripts[0]
     assert "MULT_jointstate = 1000000" in primary.scripts[0]
+    assert "MULT_velacc = 100000000" in primary.scripts[0]
     assert "10.0.0.2" in primary.scripts[0]
+    assert driver.vel_acc_multiplier == MULT_VEL_ACC
+    trajectory = components["trajectory"]
+    assert isinstance(trajectory, FakeTrajectory)
+    assert trajectory.vel_acc_multiplier == MULT_VEL_ACC
     driver.close()
+
+
+def test_script_without_vel_acc_placeholder_falls_back_to_legacy_encoding(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    events: list[str] = []
+    captured: dict[str, object] = {}
+    components: dict[str, object] = {}
+    script = tmp_path / "legacy.urscript"
+    script.write_text("MULT_jointstate = {{JOINT_STATE_REPLACE}}\n")
+    driver = UrDriver(
+        UrDriverConfiguration(
+            robot_ip="192.0.2.4",
+            script_file=script,
+            output_recipe=("timestamp",),
+            headless_mode=True,
+        ),
+        factories=make_factories(events, captured, components, reader_factory=ScriptReader),
+    )
+
+    with caplog.at_level("WARNING", logger="ur_client_library.ur.ur_driver"):
+        driver.connect()
+
+    assert driver.vel_acc_multiplier == MULT_JOINTSTATE
+    assert any("VEL_ACC_REPLACE" in record.getMessage() for record in caplog.records)
+    driver.close()
+
+
+def test_vel_acc_multiplier_requires_connect() -> None:
+    driver = UrDriver(
+        UrDriverConfiguration(robot_ip="192.0.2.4", output_recipe=("timestamp",))
+    )
+    with pytest.raises(LifecycleError):
+        _ = driver.vel_acc_multiplier
 
 
 def test_rtde_initialization_attempts_must_match_implemented_client_contract() -> None:

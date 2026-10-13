@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 from test_control_protocols import FakeServer
-from ur_client_library.control import ScriptData, ScriptReader, ScriptSender
+from ur_client_library.control import MULT_VEL_ACC, ScriptData, ScriptReader, ScriptSender
 from ur_client_library.exceptions import (
     InvalidRangeError,
     ScriptFileError,
@@ -175,6 +175,30 @@ def test_reader_include_wraps_filesystem_error(tmp_path: Path) -> None:
     assert "'loop'" in str(excinfo.value)
 
 
+def test_reader_variable_registry_tracks_last_read_including_includes(
+    tmp_path: Path,
+) -> None:
+    script = write(tmp_path / "main.urscript", "MULT_velacc = {{VEL_ACC_REPLACE}}")
+    data: ScriptData = {"VEL_ACC_REPLACE": str(MULT_VEL_ACC), "UNUSED_KEY": 42}
+    reader = ScriptReader()
+    assert not reader.is_variable_registered("VEL_ACC_REPLACE")
+
+    reader.read_script_file(script, data)
+    assert reader.is_variable_registered("VEL_ACC_REPLACE")
+    assert not reader.is_variable_registered("UNUSED_KEY")
+
+    # Tracking is reset on each read.
+    write(script, "movej([0,0,0,0,0,0])")
+    reader.read_script_file(script, data)
+    assert not reader.is_variable_registered("VEL_ACC_REPLACE")
+
+    write(tmp_path / "child.urscript", "x = {{ UNUSED_KEY }}")
+    write(script, '{% include "child.urscript" %}')
+    reader.read_script_file(script, data)
+    assert reader.is_variable_registered("UNUSED_KEY")
+    assert not reader.is_variable_registered("VEL_ACC_REPLACE")
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need elevation on Windows")
 @pytest.mark.parametrize("target_exists", [True, False])
 def test_reader_include_symlink_escaping_root_is_rejected(
@@ -250,6 +274,7 @@ def test_tool_comm_defaults_validation_and_urscript_substitution() -> None:
     assert data["TRAJECTORY_SERVER_PORT_REPLACE"] == "50003"
     assert data["SCRIPT_COMMAND_SERVER_PORT_REPLACE"] == "50004"
     assert data["TIME_REPLACE"] == "1000000"
+    assert data["VEL_ACC_REPLACE"] == "100000000"
 
 
 def test_tool_comm_rejects_invalid_configuration_and_old_versions() -> None:
@@ -309,6 +334,9 @@ def test_packaged_external_control_script_uses_current_grammar() -> None:
     assert "{{" not in rendered
     assert "{%" not in rendered
     assert "MULT_time = 1000000" in rendered
+    assert "MULT_velacc = 100000000" in rendered
+    assert "raw_point[7] / MULT_velacc" in rendered
+    assert "raw_point[13]/ MULT_velacc" in rendered
     assert (
         "direct_torque(torque, viscous_scale=viscous_scale, "
         "coulomb_scale=coulomb_scale)"

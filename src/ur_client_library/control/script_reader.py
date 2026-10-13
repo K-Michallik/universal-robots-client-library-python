@@ -53,11 +53,22 @@ class ScriptReader:
 
     MAX_INCLUDE_DEPTH = 32
 
+    def __init__(self) -> None:
+        self._variable_registry: set[str] = set()
+
     def read_script_file(
         self, file_path: str | Path, data: ScriptData | None = None
     ) -> str:
+        self._variable_registry = set()
         canonical = self._resolve(Path(file_path), str(file_path), "script file path")
         return self._read(canonical, data or {}, canonical.parent, ())
+
+    def is_variable_registered(self, key: str) -> bool:
+        """Return whether the last read substituted ``key``, including in included files.
+
+        This lets callers detect which features a user-supplied script supports.
+        """
+        return key in self._variable_registry
 
     def _read(
         self,
@@ -81,7 +92,7 @@ class ScriptReader:
                 f"Could not open script file {str(canonical_path)!r}; "
                 "check that it exists and is readable"
             ) from exc
-        script = self._replace_variables(script, data)
+        script = self._replace_variables(script, data, self._variable_registry)
         script = self._replace_conditionals(script, data)
         return self._replace_includes(
             script, canonical_path.parent, data, root_dir, (*include_stack, canonical_path)
@@ -128,7 +139,7 @@ class ScriptReader:
             raise ScriptFileError(f"Could not resolve {context} {raw!r}: {exc}") from exc
 
     @staticmethod
-    def _replace_variables(script: str, data: ScriptData) -> str:
+    def _replace_variables(script: str, data: ScriptData, registry: set[str]) -> str:
         while True:
             match = _VARIABLE.search(script)
             if match is None:
@@ -136,6 +147,7 @@ class ScriptReader:
             key = match.group(1)
             if key not in data:
                 raise UnknownVariableError(f"Variable {key!r} not found in data")
+            registry.add(key)
             replacement = ScriptReader._format_value(data[key], key=key)
             script = script[: match.start()] + replacement + script[match.end() :]
 

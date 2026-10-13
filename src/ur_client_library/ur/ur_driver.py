@@ -20,12 +20,14 @@ from ur_client_library.comm.control_mode import ControlMode
 from ur_client_library.control._server import ClientToken
 from ur_client_library.control.motion_primitives import MotionPrimitive
 from ur_client_library.control.reverse_interface import (
+    MULT_JOINTSTATE,
+    MULT_TIME,
     FreedriveControlMessage,
     TrajectoryControlMessage,
 )
 from ur_client_library.control.script_command_interface import ToolContactResult
 from ur_client_library.control.script_reader import ScriptData
-from ur_client_library.control.trajectory_point_interface import TrajectoryResult
+from ur_client_library.control.trajectory_point_interface import MULT_VEL_ACC, TrajectoryResult
 from ur_client_library.exceptions import (
     IncompatibleRobotVersionError,
     InvalidRangeError,
@@ -183,6 +185,11 @@ class TrajectoryInterfaceProtocol(Protocol):
 
     def write_motion_primitive(self, primitive: MotionPrimitive) -> None: ...
 
+    @property
+    def vel_acc_multiplier(self) -> int: ...
+
+    def set_vel_acc_multiplier(self, multiplier: int) -> None: ...
+
 
 class ScriptCommandInterfaceProtocol(Protocol):
     @property
@@ -199,6 +206,8 @@ class ScriptCommandInterfaceProtocol(Protocol):
 
 class ScriptReaderProtocol(Protocol):
     def read_script_file(self, file_path: str | Path, data: ScriptData | None = None) -> str: ...
+
+    def is_variable_registered(self, key: str) -> bool: ...
 
 
 class ScriptSenderProtocol(Protocol):
@@ -520,6 +529,16 @@ class UrDriver:
         reader = factories.script_reader()
         self._script_reader = reader
         program = self._render_external_control_script(reader, local_ip)
+        # Legacy scripts decode spline vel/acc with MULT_jointstate; only scripts
+        # defining MULT_velacc use the finer encoding.
+        if reader.is_variable_registered("VEL_ACC_REPLACE"):
+            trajectory.set_vel_acc_multiplier(MULT_VEL_ACC)
+        else:
+            _LOGGER.warning(
+                "Control script does not contain the '{{VEL_ACC_REPLACE}}' placeholder. "
+                "Falling back to legacy spline vel/acc encoding with reduced precision."
+            )
+            trajectory.set_vel_acc_multiplier(MULT_JOINTSTATE)
         if self.configuration.headless_mode:
             self._full_robot_program = self._wrap_headless_program(program)
             self.send_robot_program()
@@ -655,8 +674,9 @@ class UrDriver:
     def _render_external_control_script(self, reader: ScriptReaderProtocol, local_ip: str) -> str:
         substitutions: ScriptData = {
             "BEGIN_REPLACE": self._tool_setup_script(),
-            "JOINT_STATE_REPLACE": 1_000_000,
-            "TIME_REPLACE": 1_000_000,
+            "JOINT_STATE_REPLACE": MULT_JOINTSTATE,
+            "TIME_REPLACE": MULT_TIME,
+            "VEL_ACC_REPLACE": MULT_VEL_ACC,
             "SERVO_J_REPLACE": (
                 f"lookahead_time={self.configuration.servoj_lookahead_time:g}, "
                 f"gain={self.configuration.servoj_gain}"
@@ -925,6 +945,11 @@ class UrDriver:
     @property
     def is_trajectory_interface_connected(self) -> bool:
         return self._require(self._trajectory, "Trajectory interface").is_connected
+
+    @property
+    def vel_acc_multiplier(self) -> int:
+        """Multiplier used to encode spline point velocities and accelerations."""
+        return self._require(self._trajectory, "Trajectory interface").vel_acc_multiplier
 
     def subscribe_trajectory_done(
         self, callback: Callable[[TrajectoryResult], None]

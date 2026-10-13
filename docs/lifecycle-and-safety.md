@@ -86,6 +86,14 @@ bundled `external_control.urscript` form one wire-protocol revision. Keep them
 in lockstep. Pairing this serializer with a pre-2.12 script can misinterpret
 motion targets and parameters.
 
+Spline velocities and accelerations use the finer `MULT_VEL_ACC` (1e8)
+scaling, which the bundled script decodes as `MULT_velacc`. `UrDriver` detects
+whether the rendered script substituted `{{VEL_ACC_REPLACE}}`; custom scripts
+without it get a warning and the legacy `MULT_JOINTSTATE` spline encoding, so
+they keep working at the old 1e-6 resolution. A custom script must not
+substitute the placeholder unless it also decodes spline `qd`/`qdd` with it,
+otherwise spline velocities arrive 100x too large.
+
 Validate protocol, cleanup, and command behavior in URSim before supervised
 physical operation. URSim does not validate collision clearance, torque,
 contact, force response, or real-time deadlines.

@@ -36,6 +36,7 @@ from ur_client_library.control.script_command_interface import (
 from ur_client_library.control.script_reader import ScriptData, ScriptReader, ScriptValue
 from ur_client_library.control.script_sender import ScriptSender
 from ur_client_library.control.trajectory_point_interface import (
+    MULT_VEL_ACC,
     TrajectoryPointInterface,
     TrajectoryResult,
     TrajectoryStream,
@@ -49,6 +50,7 @@ __all__ = [
     "DEFAULT_TRAJECTORY_PORT",
     "MULT_JOINTSTATE",
     "MULT_TIME",
+    "MULT_VEL_ACC",
     "FreedriveControlMessage",
     "MotionInstruction",
     "MotionPrimitive",
