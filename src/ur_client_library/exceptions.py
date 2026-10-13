@@ -134,6 +134,14 @@ class ScriptSyntaxError(URCLException, ValueError):
     """A script template contains invalid syntax."""
 
 
+class ScriptIncludeError(ScriptSyntaxError):
+    """A script include is rooted or resolves outside the top-level script directory."""
+
+
+class ScriptFileError(URCLException, builtins.OSError):
+    """A script template or one of its includes could not be resolved or read."""
+
+
 class ScriptExecutionError(CommandError):
     """A URScript program failed while executing."""
 
