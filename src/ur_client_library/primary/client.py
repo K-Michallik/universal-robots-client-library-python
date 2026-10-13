@@ -10,6 +10,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Protocol, cast
 
+from ur_client_library.comm.stream import DEFAULT_MAX_PACKET_SIZE
 from ur_client_library.exceptions import (
     LifecycleError,
     ReadOnlyInterfaceError,
@@ -558,10 +559,7 @@ class PrimaryClient:
                     or (fail_on_warnings and error.report_level == ReportLevel.WARNING)
                     or error.message_code == 210
                 ]
-                details = "\n".join(
-                    f"{error.code}: {error.text} (severity {self._level_name(error.report_level)})"
-                    for error in reportable
-                )
+                details = "\n".join(self._format_error_code(error) for error in reportable)
                 if read_only:
                     raise ReadOnlyInterfaceError(
                         "Script cannot execute because the Primary interface is read-only"
@@ -622,6 +620,14 @@ class PrimaryClient:
                 )
         return "\n".join(lines)
 
+    @classmethod
+    def _format_error_code(cls, error: ErrorCode) -> str:
+        controller_text = f" [controller: {error.text}]" if error.text else ""
+        return (
+            f"{error.description}{controller_text} "
+            f"(severity {cls._level_name(error.report_level)})"
+        )
+
     @staticmethod
     def _level_name(level: ReportLevel | int) -> str:
         return level.name if isinstance(level, ReportLevel) else str(level)
@@ -646,7 +652,9 @@ class PrimaryClient:
             while not self._stop_event.is_set():
                 header = self._read_exact(4)
                 package_size = int.from_bytes(header, "big", signed=True)
-                if package_size < 5:
+                # Bound the size before allocating: a corrupt or hostile length
+                # prefix must not make the reader request gigabytes.
+                if not 5 <= package_size <= DEFAULT_MAX_PACKET_SIZE:
                     raise ValueError(f"Invalid Primary package size {package_size}")
                 frame = header + self._read_exact(package_size - 4)
                 for package in self._parser.parse(frame):

@@ -21,9 +21,19 @@ from ur_client_library.primary.packages import (
     SafetyModeMessage,
     VersionMessage,
 )
+from ur_client_library.ur.datatypes import ReportLevel
 from ur_client_library.ur.version_information import VersionInformation
 
 _LOGGER = logging.getLogger(__name__)
+# Upstream PrimaryConsumer::consume(ErrorCodeMessage) severity mapping; developer
+# levels are all logged at debug.
+_REPORT_LOG_LEVELS: dict[int, int] = {
+    ReportLevel.INFO: logging.INFO,
+    ReportLevel.WARNING: logging.WARNING,
+    ReportLevel.VIOLATION: logging.ERROR,
+    ReportLevel.FAULT: logging.ERROR,
+    ReportLevel.CRITICAL_FAULT: logging.ERROR,
+}
 _CallbackT = TypeVar("_CallbackT")
 
 
@@ -50,6 +60,7 @@ class PrimaryConsumer:
     def consume(self, package: PrimaryPackage) -> bool:
         typed_callbacks: tuple[Callable[[Any], object], ...] = ()
         typed_value: object | None = None
+        error_code: ErrorCode | None = None
         with self._condition:
             if isinstance(package, RobotModeData):
                 self._robot_mode_data = package
@@ -64,9 +75,9 @@ class PrimaryConsumer:
             elif isinstance(package, VersionMessage):
                 self._version_message = package
             elif isinstance(package, ErrorCodeMessage):
-                code = package.to_error_code()
-                typed_value = code
-                self._errors.append(code)
+                error_code = package.to_error_code()
+                typed_value = error_code
+                self._errors.append(error_code)
                 typed_callbacks = tuple(self._error_callbacks.values())
             elif isinstance(package, KeyMessage):
                 self._key_messages.append(package)
@@ -79,6 +90,10 @@ class PrimaryConsumer:
             callbacks = tuple(self._callbacks.values())
             self._condition.notify_all()
 
+        if error_code is not None:
+            log_level = _REPORT_LOG_LEVELS.get(error_code.report_level, logging.DEBUG)
+            if _LOGGER.isEnabledFor(log_level):
+                _LOGGER.log(log_level, "%s", error_code.description)
         # User code is never invoked while the snapshot/queue lock is held.
         for callback in callbacks:
             try:

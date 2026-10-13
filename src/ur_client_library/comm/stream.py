@@ -10,6 +10,9 @@ from typing import cast
 from ur_client_library.comm.tcp_socket import SocketState, TCPSocket
 from ur_client_library.exceptions import ParseError
 
+# Upper bound for a single length-prefixed UR package.
+DEFAULT_MAX_PACKET_SIZE = 65535
+
 
 class URStream:
     """Read complete length-prefixed packages from a composed :class:`TCPSocket`."""
@@ -21,7 +24,7 @@ class URStream:
         *,
         length_size: int = 2,
         length_decoder: Callable[[bytes], int] | None = None,
-        max_packet_size: int = 65535,
+        max_packet_size: int = DEFAULT_MAX_PACKET_SIZE,
         receive_timeout: float | None = 1.0,
         transport: TCPSocket | None = None,
     ) -> None:
