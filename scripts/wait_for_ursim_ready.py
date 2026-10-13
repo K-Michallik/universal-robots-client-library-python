@@ -16,6 +16,14 @@ wait until the UI has finished starting. The endpoints answer (412, "No
 program loaded") well before that, but the starting UI still loads its last
 program and can power the robot off, which aborts an external-control program
 started in that window.
+
+"Controllable" is not yet "quiet": PolyScope X keeps starting URCap containers
+for several seconds afterwards, and the resulting CPU contention stalls the
+realtime path long enough to trip a servo example's receive timeout. The last
+gate, after the frontend wait when there is one, therefore waits for a steady
+RTDE stream. A run that will be followed by opening the UI passes
+--no-steady-rtde and leaves that gate to the --frontend-loaded run, since the
+starting UI can stall the stream again.
 """
 
 from __future__ import annotations
@@ -26,6 +34,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 
 SERVICES = "/universal-robots/polyscopex-services/polyscopex-services"
 ROBOT_API = "/universal-robots/robot-api"
@@ -76,7 +85,83 @@ def _await(label: str, predicate, deadline: float) -> None:
     print(f"[ursim-ready] {label} after {time.monotonic() - started:.1f}s", flush=True)
 
 
-def main() -> int:
+# The servo-style examples halt the robot program once the gap between two
+# commands exceeds their receive timeout (at most 200 ms in realtime modes).
+# Right after boot, PolyScope X is still starting URCap containers, and the
+# CPU contention on a shared runner stalls the realtime path for up to ~200 ms
+# for several seconds. Hold off until the RTDE stream has been steady for a
+# while, using half the tightest receive timeout as the stall threshold.
+STEADY_WINDOW = 10.0
+STEADY_MAX_GAP = 0.1
+STEADY_TIMEOUT = 120.0
+RTDE_FREQUENCY = 500.0
+
+
+def await_steady_stream(
+    next_arrival: Callable[[], float],
+    *,
+    window: float,
+    max_gap: float,
+    deadline: float,
+) -> float:
+    """Consume package arrival times until they have been gap-free for ``window``.
+
+    ``next_arrival`` blocks for the next package and returns its arrival time on a
+    monotonic clock. Returns the largest gap seen. Raises ``TimeoutError`` with
+    that gap when ``deadline`` (same clock) passes first.
+    """
+    first = next_arrival()
+    steady_since = previous = first
+    worst = 0.0
+    while True:
+        arrival = next_arrival()
+        gap = arrival - previous
+        previous = arrival
+        worst = max(worst, gap)
+        if gap > max_gap:
+            steady_since = arrival
+        elif arrival - steady_since >= window:
+            return worst
+        if arrival >= deadline:
+            raise TimeoutError(worst)
+
+
+def _await_steady_rtde(robot_ip: str) -> None:
+    from ur_client_library.rtde.rtde_client import RTDEClient
+
+    client = RTDEClient(robot_ip, ("timestamp",), target_frequency=RTDE_FREQUENCY)
+    started = time.monotonic()
+    with client:
+        client.start(background=False)
+
+        def next_arrival() -> float:
+            client.read_data_package()
+            return time.monotonic()
+
+        try:
+            worst = await_steady_stream(
+                next_arrival,
+                window=STEADY_WINDOW,
+                max_gap=STEADY_MAX_GAP,
+                deadline=started + STEADY_TIMEOUT,
+            )
+        except TimeoutError as exc:
+            # Best effort: an always-jittery host should not block CI outright.
+            print(
+                f"[ursim-ready] WARNING: RTDE stream not steady after {STEADY_TIMEOUT:.0f}s "
+                f"(largest gap {exc.args[0] * 1000:.0f} ms); continuing",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+    print(
+        f"[ursim-ready] RTDE stream steady for {STEADY_WINDOW:.0f}s after "
+        f"{time.monotonic() - started:.1f}s (largest gap {worst * 1000:.0f} ms)",
+        flush=True,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--robot-ip", required=True)
     parser.add_argument("--timeout", type=float, default=600.0)
@@ -88,7 +173,18 @@ def main() -> int:
             "starting, which it signals by loading a program"
         ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--steady-rtde",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "finish by waiting until the RTDE stream has had no gap over "
+            f"{STEADY_MAX_GAP * 1000:.0f} ms for {STEADY_WINDOW:.0f} s, continuing with a "
+            f"warning after {STEADY_TIMEOUT:.0f} s. It runs after the --frontend-loaded "
+            "wait; skip it when the UI is opened afterwards"
+        ),
+    )
+    args = parser.parse_args(argv)
 
     base = f"http://{args.robot_ip}"
     deadline = time.monotonic() + args.timeout
@@ -110,6 +206,8 @@ def main() -> int:
             )
             print(f"[ursim-ready] loaded program: {_loaded_program(base)}", flush=True)
             _await("robot controllable", lambda: _robot_controllable(base), deadline)
+        if args.steady_rtde:
+            _await_steady_rtde(args.robot_ip)
     except TimeoutError as exc:
         print(f"[ursim-ready] TIMEOUT waiting for {exc.args[0]}", file=sys.stderr, flush=True)
         return 1

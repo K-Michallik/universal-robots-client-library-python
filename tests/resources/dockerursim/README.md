@@ -121,7 +121,7 @@ and newer, the citadel database to boot in remote control:
 bash scripts/start_ursim.sh -m ur7e -v 10.14.0 -r \
   -p tests/resources/dockerursim/programs/polyscopex/10.14.0/ur7e \
   -c tests/resources/dockerursim/citadelDB/10.14.0
-python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101
+python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101 --no-steady-rtde
 google-chrome --headless=new --user-data-dir=/tmp/polyscopex-chrome \
   http://192.168.56.101 &
 python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101 --frontend-loaded
@@ -141,6 +141,15 @@ confirmed safety. `--frontend-loaded` then waits until the starting UI has
 loaded its last program: until then it can power the robot off and abort an
 example's external-control program.
 Stop the browser before removing the container.
+
+The readiness script ends by waiting until the RTDE stream has gone 10 s
+without a gap over 100 ms, and continues with a warning after 120 s. For
+several seconds after the robot becomes controllable, PolyScope X is still
+starting URCap containers, and on a loaded host the realtime path stalls long
+enough to trip a servo example's 200 ms receive timeout. That wait runs after
+the `--frontend-loaded` wait, since the starting UI can stall the stream
+again. The first call above therefore skips it with `--no-steady-rtde`. In
+local control, one call without flags is enough.
 
 Version- and prerequisite-gated examples report as skipped rather than failing
 (for example the dashboard example when `wait_program`/`wait_program.urp` is not

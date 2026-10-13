@@ -1,7 +1,7 @@
 # Python examples
 
 The `examples` package ports the 17 executables built by the upstream URCL
-2.15.2 `examples/CMakeLists.txt`. The ports preserve protocol behavior while
+2.14.0 `examples/CMakeLists.txt`. The ports preserve protocol behavior while
 using Python lifecycle, naming, exception, and callback conventions.
 
 ## Running an example
@@ -81,9 +81,10 @@ Important version gates are:
   mode, reports it, and sends no state-changing commands
 - PolyScope X popup, system-log, shutdown, flight-report, support-file, and
   robot-information (PolyScope version, model, serial number) dashboard
-  commands: PolyScope X 10.14.0 (Robot API 5.0.107) or newer; older
-  versions raise `NotImplementedError`. Popups, log entries, shutdown, and
-  flight reports additionally require remote control
+  commands: upstream URCL 2.15 gates them on PolyScope X 10.14.0
+  (Robot API 5.0.107). Popups, log entries, shutdown, and flight reports
+  additionally require remote control. The Python PolyScope X backend does
+  not implement these commands yet and raises `NotImplementedError` for them
 - instruction example: UR5-family geometry, with Optimove requiring
   5.21.0 / 10.8.0 or newer
 - friction scales and direct torque: 5.25.1 / 10.12.1 or newer
@@ -122,12 +123,13 @@ terminal pose from invalidating the next example.
 
 `scripts/start_ursim.sh` launches representative Docker controllers. The
 repository's `.github/workflows/examples.yml` workflow runs offline checks and
-a separate PolyScope 5/e-Series and PolyScope X integration matrix. On
-PolyScope X, CI starts examples only after `scripts/wait_for_ursim_ready.py`
-has confirmed the safety configuration and the robot is controllable.
-PolyScope X entries remain visible but non-blocking because their timing is
-sensitive to shared-runner load; reproduce failures locally before treating
-them as library regressions. CB3 is not part of that matrix.
+a separate PolyScope 5/e-Series and PolyScope X integration matrix. Before
+starting examples on PolyScope X, CI waits until the robot is controllable,
+until the web frontend has finished starting in remote-control entries, and
+then until the RTDE stream has been free of realtime stalls for 10 s.
+PolyScope X entries remain visible but non-blocking because
+their timing is sensitive to shared-runner load; reproduce failures locally
+before treating them as library regressions. CB3 is not part of that matrix.
 Local and CI matrix runs can produce expected skips for controller-version,
 robot-geometry, remote-mode, and program prerequisites.
 
@@ -145,19 +147,8 @@ and newer persists its settings in a citadel database; the launcher's `-c`
 option mounts a preconditioned copy at `/citadelDB` so the controller boots
 in remote control. The workflow confirms the control mode before running the
 examples, and the dashboard example then exercises its state-changing path.
-Like upstream, it ignores the error PolyScope X returns when its initial
-power-off finds the robot already powered off. Whether every other example
-behaves the same in remote control has not been verified yet, which is one
-more reason these entries stay advisory.
-
-The Robot API program endpoints that the dashboard example loads
-`wait_program` through are served by the PolyScope X web frontend and hang
-until the client times out when no UI session is open. The remote-control
-entries therefore open the frontend in headless Chrome once the readiness
-check has passed, then rerun it with `--frontend-loaded`: the starting UI
-loads its last program and can power the robot off, so examples start only
-after it has finished. `tests/resources/dockerursim/README.md` gives the
-equivalent local commands.
+Whether every other example behaves the same in remote control has not been
+verified yet, which is one more reason these entries stay advisory.
 
 URSim validates connection, negotiation, command serialization, lifecycle, and
 cleanup. It does not validate physical torque response, contact detection,
