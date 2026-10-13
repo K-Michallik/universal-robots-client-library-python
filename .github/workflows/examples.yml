@@ -1,16 +1,41 @@
 name: Python examples
 
+# The ursim matrix costs about 50 runner-minutes per run, so it runs weekly
+# and on demand (`gh workflow run examples.yml --ref <branch>`). Pushes and
+# pull requests run only the offline and package jobs.
 on:
   workflow_dispatch:
+    inputs:
+      ursim:
+        description: Run the Docker URSim example matrix
+        type: boolean
+        default: true
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".cursor/**"
+      - "LICENSE"
+      - "NOTICE"
   push:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".cursor/**"
+      - "LICENSE"
+      - "NOTICE"
   schedule:
-    - cron: "38 2 * * *"
+    - cron: "38 2 * * 1"
 
 permissions:
   contents: read
+
+# A newer push to the same pull request or branch supersedes the older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   offline:
@@ -56,6 +81,7 @@ jobs:
           PY
 
   ursim:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.ursim)
     timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: [offline, package]

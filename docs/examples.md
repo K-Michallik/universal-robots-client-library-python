@@ -122,8 +122,12 @@ singular configuration for its fixed task frame. This prevents one example's
 terminal pose from invalidating the next example.
 
 `scripts/start_ursim.sh` launches representative Docker controllers. The
-repository's `.github/workflows/examples.yml` workflow runs offline checks and
-a separate PolyScope 5/e-Series and PolyScope X integration matrix. Before
+repository's `.github/workflows/examples.yml` workflow runs offline checks on
+every push and pull request, and a separate PolyScope 5/e-Series and
+PolyScope X integration matrix weekly and on demand. The matrix costs about 50
+runner-minutes per run, so trigger it for a branch only when a change needs it:
+`gh workflow run examples.yml --ref <branch>`. Documentation-only changes skip
+the workflow, and a newer push cancels the older run. Before
 starting examples on PolyScope X, CI waits until the robot is controllable,
 until the web frontend has finished starting in remote-control entries, and
 then until the RTDE stream has been free of realtime stalls for 10 s.
