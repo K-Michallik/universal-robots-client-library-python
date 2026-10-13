@@ -123,7 +123,7 @@ Header implementations:
 - [x] `src/control/script_command_interface.cpp` →
   `control/script_command_interface.py`
 - [x] `src/control/script_reader.cpp` → `control/script_reader.py` (include
-  root confinement, depth limit 32, `is_variable_registered`)
+  root confinement through symlinks, depth limit 32, `is_variable_registered`)
 - [x] `src/control/script_sender.cpp` → `control/script_sender.py`
 - [x] `src/control/motion_primitives.cpp` → `control/motion_primitives.py`
 - [x] `src/ur/tool_communication.cpp` → `ur/tool_communication.py`
@@ -175,13 +175,13 @@ scope even where translated protocol code retains historical compatibility.
 | Upstream change | Release | Python status |
 | --- | --- | --- |
 | #545 BinParser out-of-bounds read | 2.14.1 | Not affected; `BinParser` bounds-checks every read |
-| #546 script_reader hardening | 2.14.1 | Ported; path rejections raise `ScriptIncludeError`, filesystem failures `ScriptFileError` (an `OSError`) |
+| #546 script_reader hardening | 2.14.1 | Ported; path rejections raise `ScriptIncludeError`, filesystem failures `ScriptFileError` (an `OSError`). Paths resolve strictly first, so symlink loops fail on every Python as with `weakly_canonical` |
 | 7df9f19 `RTDEInvalidKeyException` keys | 2.14.1 | Ported as `RTDEInvalidKeyError.invalid_keys`; unavailable outputs fail `connect()` without retry |
 | #519 teardown during reconnect | 2.14.1 | Intent ported (`TCPSocket.reconnect()`, `stop_requested`, interruptible back-off); the C++ socket state machine, `unique_fd`, and `poll` TCP server are not needed |
 | #559 spline vel/acc precision | 2.15.0 | Ported as one wire revision: script, serializer, `VEL_ACC_REPLACE`, legacy-script fallback |
 | #558 MotionTarget string helpers | 2.15.0 | Ported |
 | #549 Robot API 10.14 | 2.15.0 | Ported with a per-command version table |
-| #553 PolyScope X remote control in CI | 2.15.0 | Ported to `scripts/start_ursim.sh -c` and the examples workflow |
+| #553 PolyScope X remote control in CI | 2.15.0 | Ported to `scripts/start_ursim.sh -c` and the examples workflow; remote-control entries open the web frontend in headless Chrome (upstream opens it for every PolyScope X entry), and the dashboard example ignores the initial power-off error as upstream does |
 | #564 error code texts | 2.15.1 | Ported |
 | #565 nullable program-list fields | 2.15.1 | Ported |
 | #540, #543, #554, #556, #569 | 2.14.1 to 2.15.2 | Build, URCap, or test-harness only |

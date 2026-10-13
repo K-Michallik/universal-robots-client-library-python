@@ -122,11 +122,12 @@ terminal pose from invalidating the next example.
 
 `scripts/start_ursim.sh` launches representative Docker controllers. The
 repository's `.github/workflows/examples.yml` workflow runs offline checks and
-a separate PolyScope 5/e-Series and PolyScope X integration matrix. CI gives
-the browser-backed PolyScope X services additional time to settle before
-starting examples. PolyScope X entries remain visible but non-blocking because
-their timing is sensitive to shared-runner load; reproduce failures locally
-before treating them as library regressions. CB3 is not part of that matrix.
+a separate PolyScope 5/e-Series and PolyScope X integration matrix. On
+PolyScope X, CI starts examples only after `scripts/wait_for_ursim_ready.py`
+has confirmed the safety configuration and the robot is controllable.
+PolyScope X entries remain visible but non-blocking because their timing is
+sensitive to shared-runner load; reproduce failures locally before treating
+them as library regressions. CB3 is not part of that matrix.
 Local and CI matrix runs can produce expected skips for controller-version,
 robot-geometry, remote-mode, and program prerequisites.
 
@@ -144,8 +145,19 @@ and newer persists its settings in a citadel database; the launcher's `-c`
 option mounts a preconditioned copy at `/citadelDB` so the controller boots
 in remote control. The workflow confirms the control mode before running the
 examples, and the dashboard example then exercises its state-changing path.
-Whether every other example behaves the same in remote control has not been
-verified yet, which is one more reason these entries stay advisory.
+Like upstream, it ignores the error PolyScope X returns when its initial
+power-off finds the robot already powered off. Whether every other example
+behaves the same in remote control has not been verified yet, which is one
+more reason these entries stay advisory.
+
+The Robot API program endpoints that the dashboard example loads
+`wait_program` through are served by the PolyScope X web frontend and hang
+until the client times out when no UI session is open. The remote-control
+entries therefore open the frontend in headless Chrome once the readiness
+check has passed, then rerun it with `--frontend-loaded`: the starting UI
+loads its last program and can power the robot off, so examples start only
+after it has finished. `tests/resources/dockerursim/README.md` gives the
+equivalent local commands.
 
 URSim validates connection, negotiation, command serialization, lifecycle, and
 cleanup. It does not validate physical torque response, contact detection,

@@ -31,6 +31,10 @@ Source baseline moves from URCL 2.14.0 (`91be9ee`) to 2.15.2.
   `Pose.to_string()`, and `string_from_motion_target()`.
 - `scripts/start_ursim.sh -c` mounts a PolyScope X citadel database; the
   URSim matrix adds PolyScope X 10.14.0 and runs 10.13/10.14 in remote control.
+- The remote-control URSim entries open the PolyScope X web frontend, which
+  serves the Robot API program endpoints, in headless Chrome;
+  `scripts/wait_for_ursim_ready.py --frontend-loaded` holds the examples back
+  until the frontend has finished starting.
 
 ### Changed
 
@@ -50,11 +54,14 @@ Source baseline moves from URCL 2.14.0 (`91be9ee`) to 2.15.2.
 - A failed `RTDEClient.connect()` closes its transport and returns to
   `UNINITIALIZED`.
 - `URProducer` auto-reconnect no longer reopens a stream closed during back-off.
+- In remote control, the dashboard example ignores PolyScope X rejecting the
+  initial power-off of an already powered-off robot, as upstream does.
 
 ### Security
 
-- Script includes are confined to the script directory and limited to 32
-  levels.
+- Script includes are confined to the script directory, also through
+  symlinks, and limited to 32 levels. Paths resolve strictly, so a symlink
+  loop raises `ScriptFileError` on every supported Python, including 3.13.
 - The Primary reader rejects package lengths above 65535 bytes before reading.
 
 ## 0.1.0
