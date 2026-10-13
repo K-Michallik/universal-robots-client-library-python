@@ -8,7 +8,7 @@ from contextlib import suppress
 
 import pytest
 
-from ur_client_library.exceptions import LifecycleError
+from ur_client_library.exceptions import LifecycleError, RTDEInvalidKeyError
 from ur_client_library.rtde import ClientState, DataPackage, PackageHeader, PackageType, RTDEClient
 
 
@@ -258,6 +258,70 @@ def test_client_removes_unavailable_outputs_with_fresh_handshake() -> None:
     assert server.requested_versions == [2, 1, 2, 1]
     client.close()
     server.close()
+
+
+@pytest.mark.parametrize("recipe_kind", ["output", "input"])
+def test_unknown_recipe_key_is_rejected_at_construction(recipe_kind: str) -> None:
+    output = ["actual_q", "i_do_not_exist"] if recipe_kind == "output" else ["actual_q"]
+    inputs = ["speed_slider_mask", "i_do_not_exist"] if recipe_kind == "input" else []
+
+    with pytest.raises(RTDEInvalidKeyError) as raised:
+        RTDEClient("127.0.0.1", output, inputs)
+
+    assert "i_do_not_exist" in str(raised.value)
+    assert raised.value.invalid_keys == ("i_do_not_exist",)
+    assert isinstance(raised.value, KeyError)
+
+
+def test_unavailable_output_raises_invalid_key_without_retry() -> None:
+    server = _FakeRTDEServer(unavailable_output="target_base_wrench")
+    client = RTDEClient("127.0.0.1", ["target_base_wrench"], port=server.port)
+    try:
+        with pytest.raises(RTDEInvalidKeyError) as raised:
+            client.connect(max_connection_attempts=1, max_initialization_attempts=3)
+
+        assert raised.value.invalid_keys == ("target_base_wrench",)
+        assert "'target_base_wrench'" in str(raised.value)
+        assert server.output_setup_count == 1
+        assert server.requested_versions == [2, 1]
+        assert client.state is ClientState.UNINITIALIZED
+        assert not client._stream.is_connected
+    finally:
+        client.close()
+        server.close()
+
+
+def test_close_interrupts_unbounded_reconnect() -> None:
+    # Regression for upstream #519: close() must cancel an endless reconnect.
+    server = _FakeRTDEServer()
+    client = RTDEClient("127.0.0.1", ["timestamp"], target_frequency=10.0, port=server.port)
+    client.connect(
+        max_connection_attempts=0,
+        reconnection_timeout=5.0,
+        max_initialization_attempts=1,
+        initialization_timeout=0.01,
+    )
+    client.start()
+    assert client.get_data_package(timeout=1.0) is not None
+
+    server.close()
+    deadline = time.monotonic() + 3.0
+    while not client._reconnecting.is_set() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    # Give the worker time to enter its (5 s) back-off between socket attempts.
+    time.sleep(0.2)
+    assert client._reconnecting.is_set()
+    assert client.state in (ClientState.CONNECTION_LOST, ClientState.INITIALIZING)
+    thread = client._reconnect_thread
+    assert thread is not None
+    assert thread.is_alive()
+
+    started = time.monotonic()
+    client.close()
+    assert time.monotonic() - started < 2.5
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()
+    assert client.state is ClientState.UNINITIALIZED
 
 
 def test_client_retries_transient_input_conflict() -> None:

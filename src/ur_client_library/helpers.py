@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import TypeVar
 
 from ur_client_library.exceptions import URCLTimeoutError
+from ur_client_library.types import MotionTarget
 from ur_client_library.ur.datatypes import RobotSeries, RobotType
 from ur_client_library.ur.version_information import VersionInformation
 
@@ -102,6 +103,11 @@ def robot_type_from_string(value: str) -> RobotType:
         return _ROBOT_TYPES[value]
     except KeyError as exc:
         raise ValueError(f"Unknown robot type: {value}") from exc
+
+
+def string_from_motion_target(target: MotionTarget) -> str:
+    """Return the upstream ``stringFromMotionTarget()`` text of a ``Q`` or ``Pose``."""
+    return target.to_string()
 
 
 def round_half_away_from_zero(value: float) -> int:
