@@ -614,6 +614,9 @@ class RTDEClient:
         if self._background_running.is_set():
             return
         self._background_running.set()
+        self._launch_background_thread()
+
+    def _launch_background_thread(self) -> None:
         self._background_thread = threading.Thread(
             target=self._background_loop,
             name="rtde-reader",
@@ -679,6 +682,7 @@ class RTDEClient:
                 self._latest_condition.notify_all()
             self._disconnect_transport()
             last_error: BaseException | None = None
+            finished = False
             try:
                 initialization_failures = 0
                 while initialization_failures < self._max_initialization_attempts:
@@ -688,16 +692,28 @@ class RTDEClient:
                         self._setup_communication()
                         with self._state_lock:
                             self._state = ClientState.INITIALIZED
+                        final_state = ClientState.INITIALIZED
                         if prior_state is ClientState.RUNNING:
                             with self._io_lock:
                                 self._send_start()
-                            with self._state_lock:
-                                self._state = ClientState.RUNNING
-                            if background_was_running:
-                                self.start_background_read()
+                            final_state = ClientState.RUNNING
                         elif prior_state is ClientState.PAUSED:
-                            with self._state_lock:
-                                self._state = ClientState.PAUSED
+                            final_state = ClientState.PAUSED
+                        start_reader = background_was_running and final_state is ClientState.RUNNING
+                        if start_reader:
+                            self._background_running.set()
+                        # Finish the reconnect before anything can observe its result.
+                        # Clearing the flag before the reader starts lets a failure the
+                        # reader hits at once schedule a new reconnect instead of being
+                        # dropped; clearing it before the final state is published means
+                        # a caller that sees RUNNING gets a get_data_package() that waits
+                        # for data instead of an immediate None.
+                        finished = True
+                        self._reconnecting.clear()
+                        if start_reader:
+                            self._launch_background_thread()
+                        with self._state_lock:
+                            self._state = final_state
                         return
                     except (
                         URCLConnectionError,
@@ -727,7 +743,8 @@ class RTDEClient:
                 with self._state_lock:
                     self._state = ClientState.UNINITIALIZED
             finally:
-                self._reconnecting.clear()
+                if not finished:
+                    self._reconnecting.clear()
 
     def _disconnect_transport(self) -> None:
         self._writer.close()
