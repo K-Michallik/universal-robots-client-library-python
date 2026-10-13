@@ -98,6 +98,24 @@ jobs:
           python-version: "3.10"
           cache: pip
       - run: python -m pip install -e .
+      # PolyScope X images load their bundled controller and URCap images into
+      # a nested Docker whose /var/lib/docker volume sits on the runner's root
+      # disk. 10.14 filled a stock runner's free space while installing its
+      # URCaps, so the UI never came up. Remove large preinstalled toolchains
+      # that no step here uses; setup-python's toolcache Python, Chrome and
+      # Docker live elsewhere and stay. Every entry runs it: the cost is a
+      # parallel delete, and a growing image cannot reintroduce the failure
+      # in an entry that skipped it.
+      - name: Free runner disk space
+        run: |
+          df -h / /var/lib/docker
+          docker system df
+          for dir in /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                     /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift; do
+            sudo rm -rf "${dir}" &
+          done
+          wait
+          df -h / /var/lib/docker
       - name: Start URSim
         env:
           PROGRAM_FOLDER: ${{ matrix.program-folder || '' }}
@@ -155,6 +173,10 @@ jobs:
             --user-data-dir="${RUNNER_TEMP}/polyscopex-chrome" \
             http://192.168.56.101 > "${RUNNER_TEMP}/polyscopex-chrome.log" 2>&1 &
           python scripts/wait_for_ursim_ready.py --robot-ip 192.168.56.101 --frontend-loaded
+      # Record the headroom left once URSim, and on PolyScope X its URCaps and
+      # web frontend, are up, and again after the examples.
+      - name: Show disk usage before examples
+        run: df -h / /var/lib/docker
       - name: Run bounded examples
         env:
           URCL_LOG_LEVEL: DEBUG
@@ -163,6 +185,9 @@ jobs:
           # Primary interface; record it alongside the example output.
           python scripts/primary_monitor.py --robot-ip 192.168.56.101 > primary-monitor.log 2>&1 &
           python run_examples.py --simulator --robot-ip 192.168.56.101
+      - name: Show disk usage after examples
+        if: always()
+        run: df -h / /var/lib/docker
       - name: Print primary monitor
         if: always()
         run: cat primary-monitor.log || true
