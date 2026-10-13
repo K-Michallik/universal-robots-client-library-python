@@ -67,7 +67,7 @@ class ScriptSender:
             self._server.start()
         except OSError as exc:
             raise URCLConnectionError(
-                f"Could not start script sender on port {self._server.port}"
+                f"Could not start script sender on port {self._server.port}: {exc}"
             ) from exc
 
     connect = start
