@@ -116,6 +116,11 @@ jobs:
           done
           wait
           df -h / /var/lib/docker
+      # 50001-50004 are inside the ephemeral range, so an outgoing connection
+      # (RTDE, primary, dashboard) can take one as its source port and make
+      # the control servers fail to bind with EADDRINUSE.
+      - name: Keep the control ports out of the ephemeral range
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=50001-50004
       - name: Start URSim
         env:
           PROGRAM_FOLDER: ${{ matrix.program-folder || '' }}
