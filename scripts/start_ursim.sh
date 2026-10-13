@@ -10,14 +10,15 @@ version="5.9.4"
 container_name="ursim"
 ip_address="192.168.56.101"
 program_folder=""
+citadel_db_folder=""
 replace_existing=false
 dry_run=false
 
 usage() {
-  echo "Usage: $0 [-m model] [-v version] [-n container] [-i ip] [-p program-folder] [-r] [-t]"
+  echo "Usage: $0 [-m model] [-v version] [-n container] [-i ip] [-p program-folder] [-c citadel-db-folder] [-r] [-t]"
 }
 
-while getopts ":hm:v:n:i:p:rt" option; do
+while getopts ":hm:v:n:i:p:c:rt" option; do
   case "${option}" in
     h)
       usage
@@ -28,6 +29,7 @@ while getopts ":hm:v:n:i:p:rt" option; do
     n) container_name="${OPTARG}" ;;
     i) ip_address="${OPTARG}" ;;
     p) program_folder="${OPTARG}" ;;
+    c) citadel_db_folder="${OPTARG}" ;;
     r) replace_existing=true ;;
     t) dry_run=true ;;
     :)
@@ -102,12 +104,31 @@ if [[ "${version}" != "latest" ]]; then
   fi
 fi
 
+# The citadel database persists PolyScope X settings such as remote-control
+# mode across container restarts. As upstream, it only applies to PolyScope X
+# and is ignored for other series. Unlike upstream, a missing folder is an
+# error instead of being created empty: an empty database boots in local
+# control and would hide a mistyped fixture path.
+if [[ -n "${citadel_db_folder}" ]]; then
+  if [[ "${series}" != "polyscopex" ]]; then
+    echo "Ignoring -c ${citadel_db_folder}: a citadel database only applies to PolyScope X." >&2
+    citadel_db_folder=""
+  elif [[ ! -d "${citadel_db_folder}" ]]; then
+    echo "Citadel database folder does not exist: ${citadel_db_folder}" >&2
+    exit 2
+  else
+    citadel_db_folder="$(realpath "${citadel_db_folder}")"
+  fi
+fi
+
 if [[ -z "${program_folder}" ]]; then
   script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   program_folder="${script_directory}/../tests/resources/dockerursim/programs/${series}"
 fi
-program_folder="$(realpath "${program_folder}")"
+# Create the folder before resolving it: realpath requires every parent to
+# exist, and per-version folders such as polyscopex/10.14.0/ur7e are nested.
 mkdir -p "${program_folder}"
+program_folder="$(realpath "${program_folder}")"
 
 image="universalrobots/ursim_${series}:${version}"
 upper_model="${model^^}"
@@ -137,6 +158,9 @@ if [[ "${series}" == "polyscopex" ]]; then
     -v "${program_folder}:/ur/bin/backend/applications"
     -e "ROBOT_TYPE=${controller_model}"
   )
+  if [[ -n "${citadel_db_folder}" ]]; then
+    docker_args+=(-v "${citadel_db_folder}:/citadelDB")
+  fi
   if [[ "${version}" == "10.7.0" ]]; then
     docker_args+=(-e "ROBOT_TYPE_CONTROLLER=${controller_model}")
   fi

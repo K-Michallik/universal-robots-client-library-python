@@ -31,13 +31,23 @@ confirmation.
    bash scripts/start_ursim.sh -m MODEL -v VERSION
    ```
 
-   The launcher creates the network, starts the fixed-IP container, waits for
+   When the matrix entry sets `program-folder` or `citadel-db`, pass them as
+   `-p FOLDER` and `-c FOLDER`. The citadel database boots PolyScope X
+   10.13.0+ in remote control; without it the dashboard example only reads
+   state. The launcher creates the network, starts the fixed-IP container, waits for
    the Primary port, and allows controller stabilization. Use `-r` only when
    the user explicitly intends to replace an existing `ursim` container.
 
-5. For PolyScope X (`10.*`), initialize the web application before running
-   examples. Follow the current CI browser command when Chrome is available,
-   or ask the user to open `http://192.168.56.101`.
+5. For PolyScope X (`10.*`), run `scripts/wait_for_ursim_ready.py` before
+   running examples, as CI does. It ends by waiting for a steady RTDE stream,
+   since the post-boot URCap startup stalls the realtime path. In remote
+   control (citadel database mounted), pass `--no-steady-rtde` to that first
+   run and open the web frontend afterwards, since the Robot API program
+   endpoints only answer while a UI session is open: follow the current CI
+   browser command when Chrome is available, or ask the user to open
+   `http://192.168.56.101`. Then rerun the script with `--frontend-loaded`, so
+   examples start only after the UI has finished starting and the RTDE
+   stream has settled again.
 6. Run the bounded examples:
 
    ```bash
@@ -67,3 +77,6 @@ URSim writes root-owned links, installations, databases, locks, and blobs into
 bind-mounted fixture directories. They are runtime artifacts: do not stage or
 commit them, and do not delete intentional seed variables or directory
 markers.
+The per-version PolyScope X program folders and `citadelDB/` databases are
+tracked seeds that a run rewrites in place; restore them with `git restore`
+instead of committing the changes.

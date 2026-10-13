@@ -80,3 +80,46 @@ def test_a_never_steady_stream_times_out_with_the_worst_gap() -> None:
         )
 
     assert raised.value.args[0] == pytest.approx(0.152, abs=0.003)
+
+
+@pytest.fixture
+def gates(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record the order in which ``main`` passes its gates, with every gate open."""
+    passed: list[str] = []
+
+    def fake_await(label: str, predicate: object, deadline: float) -> None:
+        passed.append(label)
+
+    monkeypatch.setattr(ready, "_await", fake_await)
+    monkeypatch.setattr(ready, "_safety_confirmed", lambda base: True)
+    monkeypatch.setattr(ready, "_loaded_program", lambda base: "wait_program")
+    monkeypatch.setattr(ready, "_await_steady_rtde", lambda robot_ip: passed.append("steady rtde"))
+    return passed
+
+
+def test_gate_ends_with_a_steady_rtde_stream_by_default(gates: list[str]) -> None:
+    assert ready.main(["--robot-ip", "192.168.56.101"]) == 0
+
+    assert gates == ["bootstrapper finished", "robot controllable", "steady rtde"]
+
+
+def test_steady_rtde_runs_after_the_frontend_has_loaded(gates: list[str]) -> None:
+    # The starting frontend can power the robot off and stall the stream, so
+    # the stream only counts once it has loaded and the robot is back.
+    assert ready.main(["--robot-ip", "192.168.56.101", "--frontend-loaded"]) == 0
+
+    assert gates == [
+        "bootstrapper finished",
+        "robot controllable",
+        "web frontend loaded a program",
+        "robot controllable",
+        "steady rtde",
+    ]
+
+
+def test_no_steady_rtde_skips_the_stream_gate(gates: list[str]) -> None:
+    # CI's first gate for remote-control entries: the UI opens next, and the
+    # --frontend-loaded run waits for the steady stream instead.
+    assert ready.main(["--robot-ip", "192.168.56.101", "--no-steady-rtde"]) == 0
+
+    assert gates == ["bootstrapper finished", "robot controllable"]
