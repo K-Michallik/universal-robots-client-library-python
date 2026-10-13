@@ -1,10 +1,10 @@
 # Universal Robots Client Library Python
 
 A synchronous, pure-Python client library for Universal Robots interfaces.
-The implementation translates the active behavior of URCL 2.14.0 while
+The implementation translates the active behavior of URCL 2.15.2 while
 presenting Pythonic lifecycle, naming, typing, and error semantics.
 
-> **Status:** the URCL 2.14.0 source-parity pass is complete. The project is a
+> **Status:** the URCL 2.15.2 source-parity pass is complete. The project is a
 > `0.1.0` alpha: focused unit/protocol tests and a Docker URSim example matrix
 > cover the translated surface, while physical-hardware validation remains
 > limited. One out-of-band PolyScope 5 smoke test established a connection and
@@ -26,8 +26,8 @@ excluded because that controller generation is no longer supported.
 
 The source baseline is
 [UniversalRobots/Universal_Robots_Client_Library](https://github.com/UniversalRobots/Universal_Robots_Client_Library)
-2.14.0 at commit `91be9eeac2028b0a5ee3654b5d12508cebefc1e6`
-(the 2.14.0 tag plus two non-functional maintenance commits).
+2.15.2 at commit `7747b683a68ca5f23d33fde4405e24e55d390b85`. Changes on upstream `master` after the
+2.15.2 tag are not part of the baseline; see `docs/parity.md`.
 
 ## Installation
 

@@ -1,6 +1,6 @@
 # Future improvements
 
-These items are intentionally deferred to preserve URCL 2.14.0 behavior during
+These items are intentionally deferred to preserve URCL 2.15.2 behavior during
 the first Python translation.
 
 ## Share the Primary connection in ExampleRobotWrapper
